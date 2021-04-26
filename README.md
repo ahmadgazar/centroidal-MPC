@@ -1,1 +1,1 @@
-# centroidal-MPC
+# SCP-centroidal-MPC
