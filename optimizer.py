@@ -103,13 +103,13 @@ class Slack_optimizer():
     def __fill_permutation_matrices(self):
         if self._name == 'state':
             # pre-allocate memory
-            self._nb_slack_constraints = self.nt*(2**self.nx)
-            self._penum_mat = np.zeros((2**self.nx, self.nx))     
+            self._nb_slack_constraints = self.nt*(2**(self.nx-6))
+            self._penum_mat = np.zeros((2**(self.nx-6), self.nx-6))     
             self._constraint_idx_vector = np.zeros(self.N, dtype=int)
             self._x0_optimizer_idx_vector = np.zeros(self.N, dtype=int)
             self._slack_optimizers_idx_vector = np.zeros(self.N, dtype=int)
-            for x_idx in range(self.nx):
-                self._penum_mat[:, x_idx] = np.array([(-1)**(j//(2**x_idx)) for j in range(2**self.nx)])
+            for x_idx in range(self.nx-6):
+                self._penum_mat[:, x_idx] = np.array([(-1)**(j//(2**x_idx)) for j in range(2**(self.nx-6))])
         elif self._name == 'control':
             # pre-allocate memory
             self._nb_slack_constraints = self.nt*(2**self.nu)

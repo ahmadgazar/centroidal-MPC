@@ -69,7 +69,7 @@ class Constraints:
         elif self._CONSTRAINT_IDENTIFIER == 'STATE_TRUST_REGION':
             self._constraint_related_optimizers = model._optimizers_objects['state_slack']
             omega, delta = model._scp_params['omega0'], model._scp_params['trust_region_radius0'] 
-            self.construct_state_trust_region_constraints(data, omega, delta)                                                                                                                         
+            self.construct_state_trust_region_constraints(model, data, omega, delta)                                                                                                                         
     
     def construct_initial_constraints(self, model):
         self._constraints_matrix = np.hstack([np.eye(self.nx), np.zeros((self.nx, self.nx*(self.N-1))), 
@@ -98,6 +98,7 @@ class Constraints:
             self._constraints_matrix[x_index_k:x_index_k+nb_x, x_index_k+nb_x:x_index_k+(2*nb_x)] = \
                                                                               -np.eye(nb_x) # x_{k+1}
             linearized_dynamics = A_k@x_k + B_k@u_k - x_k_plus 
+            linearized_dynamics[:6] = -x_k_plus[:6]  
             #print('linearized_dynamics = ', linearized_dynamics)
             # adding a slack to avoid infeasibility due to numerical issues
             self._lower_bound[x_index_k:x_index_k+nb_x] = linearized_dynamics - 1e-5
@@ -263,9 +264,9 @@ class Constraints:
     """
     state trust region constraints based on l1-norm exact penalty method
     """
-    def construct_state_trust_region_constraints(self, data, omega, delta):
+    def construct_state_trust_region_constraints(self, model, data, omega, delta):
         nb_optimizers = self.n_all
-        nb_l1_norm_constraints = (2**self.nu)*(self.N)
+        nb_l1_norm_constraints = (2**(self.nx-6))*(self.N)
         nb_slack_constraints = self.nt*(self.N)
         # pre-allocate memory
         slack_constraint_mat = np.zeros((nb_slack_constraints, nb_optimizers))
@@ -281,20 +282,21 @@ class Constraints:
         for time_idx in range(self.N-1):
             x0_idx = optimizer_object._x0_optimizer_idx_vector[time_idx]
             slack_idx = optimizer_object._slack_optimizers_idx_vector[time_idx]
-            for penum_index in range(2**self.nx):
-                constraint_idx =  penum_index + time_idx*(2**self.nx)
+            for penum_index in range(2**(self.nx-6)):
+                constraint_idx =  penum_index + time_idx*(2**(self.nx-6))
                 # |X-X_j| <= delta_j + t/w_j
-                l1_norm_constraint_mat[constraint_idx, x0_idx:x0_idx + self.nx] = \
+                l1_norm_constraint_mat[constraint_idx, x0_idx+6:x0_idx+9] = \
                                                         penum_mat[penum_index, :]
                 l1_norm_constraint_mat[constraint_idx, slack_idx] = -1./omega
-                l1_norm_upper_bound[constraint_idx] = delta + penum_mat[penum_index, :] @ X[:, time_idx]
+                l1_norm_upper_bound[constraint_idx] = delta + penum_mat[penum_index, :] @ X[6:, time_idx]
         # -t <= 0
-        slack_constraint_mat[:, nb_optimizers-nb_slack_constraints:] = -np.eye(nb_slack_constraints)
+        slack_idx0 = model._n_x*model._N + model._n_u*(model._N-1)  
+        slack_constraint_mat[:, slack_idx0:slack_idx0+model._N] = -np.eye(nb_slack_constraints)
         # stack up all constraints
-        self._constraints_matrix = l1_norm_constraint_mat
+        #self._constraints_matrix = l1_norm_constraint_mat
         self._constraints_matrix = np.vstack([l1_norm_constraint_mat, slack_constraint_mat])
         self._upper_bound = np.hstack([l1_norm_upper_bound, slack_upper_bound])
-        self._lower_bound = np.hstack([l1_norm_lower_bound, slack_lower_bound])
+        self._lower_bound = np.hstack([l1_norm_lower_bound, slack_lower_bound])     
                  
 
 if __name__=='__main__':
