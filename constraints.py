@@ -18,20 +18,17 @@ class Constraints:
 
         elif self._CONSTRAINT_IDENTIFIER == 'DYNAMICS':
             # pre-allocate memory
-            self._constraints_matrix = np.zeros((self.nx*(self.N-1), 
-                                self.nx*self.N + self.nu*(self.N-1) + self.nt*(self.N) + self.nt*(self.N-1)))
-            self._upper_bound = np.zeros(self.nx*(self.N-1))
-            self._lower_bound = np.zeros(self.nx*(self.N-1))
+            self._constraints_matrix = np.zeros((self.nx*(self.N), self.n_all))
+            self._upper_bound = np.zeros(self.nx*(self.N))
+            self._lower_bound = np.zeros(self.nx*(self.N))
             self._constraint_related_optimizers = model._optimizers_objects['dynamics'] 
             self.construct_dynamics_constraints(model, data)   
         
         elif self._CONSTRAINT_IDENTIFIER == 'COM_REACHABILITY':
-            self._constraints_matrix = np.zeros((self.N-1, 
-                                self.nx*self.N + self.nu*(self.N-1) + self.nt*(self.N-1)))
-            self._upper_bound = np.zeros(self.N-1)
-            self._lower_bound = np.zeros(self.N-1)
-            self._constraint_related_optimizers = model._optimizers_objects['com_z']
-                                                   
+            self._constraints_matrix = np.zeros((self.N+1, self.n_all)) 
+            self._upper_bound = np.zeros(self.N+1)
+            self._lower_bound = np.zeros(self.N+1)
+            self._constraint_related_optimizers = model._optimizers_objects['com_z']         
             self.construct_com_reachability_constraints()
 
         elif self._CONSTRAINT_IDENTIFIER == 'FINAL_CONDITIONS':
@@ -39,9 +36,9 @@ class Constraints:
            
         elif self._CONSTRAINT_IDENTIFIER == 'COP':
             # pre-allocate memory
-            self._constraints_matrix = np.zeros((4*(self.N-1), self.n_all))
-            self._upper_bound = np.zeros(4*(self.N-1))
-            self._lower_bound = np.zeros(4*(self.N-1))
+            self._constraints_matrix = np.zeros((4*(self.N), self.n_all))
+            self._upper_bound = np.zeros(4*(self.N))
+            self._lower_bound = np.zeros(4*(self.N))
             self._constraint_related_optimizers = {'RF':[model._optimizers_objects['cop_x_rf'],
                                                          model._optimizers_objects['cop_y_rf']],
                                                    'LF':[model._optimizers_objects['cop_x_lf'],
@@ -51,8 +48,6 @@ class Constraints:
         
         elif self._CONSTRAINT_IDENTIFIER == 'UNILATERAL': 
             # pre-allocate memory
-            self._constraints_matrix = np.zeros((model._n_x*self.N + model._n_u*(self.N-1), 
-                                                        model._N, model._n_x + model._n_u))
             self._constraint_related_optimizers = {'RF':[model._optimizers_objects['fx_rf'], 
                                                          model._optimizers_objects['fy_rf'],
                                                          model._optimizers_objects['fz_rf']],
@@ -72,8 +67,8 @@ class Constraints:
             self.construct_state_trust_region_constraints(model, data, omega, delta)                                                                                                                         
     
     def construct_initial_constraints(self, model):
-        self._constraints_matrix = np.hstack([np.eye(self.nx), np.zeros((self.nx, self.nx*(self.N-1))), 
-                                   np.zeros((self.nx, self.n_all-self.nx*self.N))])
+        self._constraints_matrix = np.hstack([np.eye(self.nx), np.zeros((self.nx, self.nx*(self.N))), 
+                                   np.zeros((self.nx, self.n_all-self.nx*(self.N+1)))])
         self._lower_bound = self._upper_bound = model._x_init
        
     def construct_dynamics_constraints(self, model, data):
@@ -86,8 +81,7 @@ class Constraints:
         U_traj = np.copy(data.previous_trajectories['control'])
         #print('previous control trajectory = ', U_traj)
         A_traj, B_traj = np.copy(data.gradients['f_x']), np.copy(data.gradients['f_u'])
-       
-        for time_idx in range(self.N-1):
+        for time_idx in range(self.N):
             x_k, x_k_plus, u_k = X_traj[:, time_idx], X_plus_traj[:, time_idx], U_traj[:, time_idx]
             A_k = np.reshape(A_traj[:, time_idx], (nb_x, nb_x), order='F')
             B_k = np.reshape(B_traj[:, time_idx], (nb_x, nb_u), order='F')
@@ -98,48 +92,47 @@ class Constraints:
             self._constraints_matrix[x_index_k:x_index_k+nb_x, x_index_k+nb_x:x_index_k+(2*nb_x)] = \
                                                                               -np.eye(nb_x) # x_{k+1}
             linearized_dynamics = A_k@x_k + B_k@u_k - x_k_plus 
-            linearized_dynamics[:6] = -x_k_plus[:6]  
             #print('linearized_dynamics = ', linearized_dynamics)
             # adding a slack to avoid infeasibility due to numerical issues
             self._lower_bound[x_index_k:x_index_k+nb_x] = linearized_dynamics - 1e-5
             self._upper_bound[x_index_k:x_index_k+nb_x] = linearized_dynamics + 1e-5
-        
+
     """
     TODO: properly for a wallking motion 
     """
     def construct_com_reachability_constraints(self):
         optimizer_object = self._constraint_related_optimizers  
-        for time_idx in range(self.N-1):
+        for time_idx in range(self.N+1):
             optimizer_idx = optimizer_object._optimizer_idx_vector[time_idx]
             self._constraints_matrix[time_idx, optimizer_idx] = 1.0
-            self._lower_bound[time_idx] = 0.88 - 0.001
-            self._upper_bound[time_idx] = 0.88 + 0.001                  
+            self._lower_bound[time_idx] = 0.88 
+            self._upper_bound[time_idx] = 0.88                   
     """
     TODO: construct a control invariant set in the future for MPC to guarantee recursive feasibility 
     """
     def construct_final_constraints(self, model):
-        self._constraints_matrix = np.hstack([np.zeros((self.nx, self.nx*(self.N-1))), 
-                        np.eye(self.nx), np.zeros((self.nx, self.n_all-self.nx*self.N))])
+        self._constraints_matrix = np.hstack([np.zeros((self.nx, self.nx*(self.N))), 
+                        np.eye(self.nx), np.zeros((self.nx, self.n_all-self.nx*(self.N+1)))])
         self._lower_bound = model._x_final - 5e-5
         self._upper_bound = model._x_final + 5e-5
     
     def construct_cop_constraints(self):
         # pre-allocate memory
-        Aineq_x_rf = np.zeros((self.N-1, self.n_all))
-        Aineq_y_rf = np.zeros((self.N-1, self.n_all))
-        Aineq_x_lf = np.zeros((self.N-1, self.n_all))
-        Aineq_y_lf = np.zeros((self.N-1, self.n_all))
-        u_x_rf = np.zeros(self.N-1)
-        u_y_rf = np.zeros(self.N-1)
-        l_x_rf = np.zeros(self.N-1)
-        l_y_rf = np.zeros(self.N-1)
-        u_x_lf = np.zeros(self.N-1)
-        u_y_lf = np.zeros(self.N-1)
-        l_x_lf = np.zeros(self.N-1)
-        l_y_lf = np.zeros(self.N-1)
+        Aineq_x_rf = np.zeros((self.N, self.n_all))
+        Aineq_y_rf = np.zeros((self.N, self.n_all))
+        Aineq_x_lf = np.zeros((self.N, self.n_all))
+        Aineq_y_lf = np.zeros((self.N, self.n_all))
+        u_x_rf = np.zeros(self.N)
+        u_y_rf = np.zeros(self.N)
+        l_x_rf = np.zeros(self.N)
+        l_y_rf = np.zeros(self.N)
+        u_x_lf = np.zeros(self.N)
+        u_y_lf = np.zeros(self.N)
+        l_x_lf = np.zeros(self.N)
+        l_y_lf = np.zeros(self.N)
         optimizer_objects_rf = self._constraint_related_optimizers['RF']
         optimizer_objects_lf = self._constraint_related_optimizers['LF']
-        for time_idx in range(self.N-1):
+        for time_idx in range(self.N):
             # right foot CoP local constraints
             if self.contact_trajectory['RF'][time_idx]:
                 for x_y_idx, optimizer_object in enumerate (optimizer_objects_rf):
@@ -174,15 +167,15 @@ class Constraints:
     
     def construct_unilaterality_constraints(self):
         # pre-allocate memory
-        Aineq_fz_rf = np.zeros((self.N-1, self.n_all))
-        Aineq_fz_lf = np.zeros((self.N-1, self.n_all))
-        u_fz_rf = np.inf*np.ones(self.N-1)
-        l_fz_rf = np.zeros(self.N-1)
-        u_fz_lf = np.inf**np.ones(self.N-1)
-        l_fz_lf = np.zeros(self.N-1)
+        Aineq_fz_rf = np.zeros((self.N, self.n_all))
+        Aineq_fz_lf = np.zeros((self.N, self.n_all))
+        u_fz_rf = np.inf*np.ones(self.N)
+        l_fz_rf = np.zeros(self.N)
+        u_fz_lf = np.inf*np.ones(self.N)
+        l_fz_lf = np.zeros(self.N)
         optimizer_objects_rf = self._constraint_related_optimizers['RF'] 
         optimizer_objects_lf = self._constraint_related_optimizers['LF']
-        for time_idx in range(self.N-1):       
+        for time_idx in range(self.N):       
             # Right foot unilateral constraint
             if self.contact_trajectory['RF'][time_idx]:
                 contact_rotation_rf = self.contact_trajectory['RF'][time_idx].pose.rotation
@@ -197,7 +190,7 @@ class Constraints:
                 for x_y_z_idx, optimizer_object in enumerate (optimizer_objects_lf): 
                     optimizer_idx = optimizer_object._optimizer_idx_vector[time_idx]
                     Aineq_fz_lf[time_idx, optimizer_idx] = contact_normal_lf[x_y_z_idx]
-        self._constraints_matrix =  np.vstack([Aineq_fz_rf, Aineq_fz_lf])
+        self._constraints_matrix = np.vstack([Aineq_fz_rf, Aineq_fz_lf])
         self._upper_bound = np.hstack([u_fz_rf,  u_fz_lf])
         self._lower_bound = np.hstack([l_fz_rf,  l_fz_lf])             
 
@@ -206,8 +199,8 @@ class Constraints:
     """
     def construct_control_trust_region_constraints(self, data, omega, delta):
         nb_optimizers = self.n_all
-        nb_l1_norm_constraints = (2**self.nu)*(self.N-1)
-        nb_slack_constraints = self.nt*(self.N-1)
+        nb_l1_norm_constraints = (2**self.nu)*(self.N)
+        nb_slack_constraints = self.nt*(self.N)
         # pre-allocate memory
         slack_constraint_mat = np.zeros((nb_slack_constraints, nb_optimizers))
         slack_upper_bound = np.zeros(nb_slack_constraints)
@@ -221,7 +214,7 @@ class Constraints:
         penum_mat_all = optimizer_object._penum_mat_all
         penum_mat_rf = optimizer_object._penum_mat_rf    
         penum_mat_lf = optimizer_object._penum_mat_lf    
-        for time_idx in range(self.N-1):
+        for time_idx in range(self.N):
             #constraint_idx = optimizer_object._constraint_idx_vector[time_idx]
             u0_idx = optimizer_object._u0_optimizer_idx_vector[time_idx]
             slack_idx = optimizer_object._slack_optimizers_idx_vector[time_idx]
@@ -256,7 +249,7 @@ class Constraints:
         slack_constraint_mat[:, nb_optimizers-nb_slack_constraints:] = -np.eye(nb_slack_constraints)
         # stack up all constraints
         self._constraints_matrix = l1_norm_constraint_mat
-        self._constraints_matrix =  np.vstack([l1_norm_constraint_mat, slack_constraint_mat])
+        self._constraints_matrix = np.vstack([l1_norm_constraint_mat, slack_constraint_mat])
         self._upper_bound = np.hstack([l1_norm_upper_bound, slack_upper_bound])
         self._lower_bound = np.hstack([l1_norm_lower_bound, slack_lower_bound])
 
@@ -266,8 +259,8 @@ class Constraints:
     """
     def construct_state_trust_region_constraints(self, model, data, omega, delta):
         nb_optimizers = self.n_all
-        nb_l1_norm_constraints = (2**(self.nx-6))*(self.N)
-        nb_slack_constraints = self.nt*(self.N)
+        nb_l1_norm_constraints = (2**(self.nx-6))*(self.N+1)
+        nb_slack_constraints = self.nt*(self.N+1)
         # pre-allocate memory
         slack_constraint_mat = np.zeros((nb_slack_constraints, nb_optimizers))
         slack_upper_bound = np.zeros(nb_slack_constraints)
@@ -279,7 +272,7 @@ class Constraints:
         optimizer_object = self._constraint_related_optimizers 
         X = np.copy(data.previous_trajectories['state'])
         penum_mat = optimizer_object._penum_mat
-        for time_idx in range(self.N-1):
+        for time_idx in range(self.N+1):
             x0_idx = optimizer_object._x0_optimizer_idx_vector[time_idx]
             slack_idx = optimizer_object._slack_optimizers_idx_vector[time_idx]
             for penum_index in range(2**(self.nx-6)):
@@ -290,8 +283,8 @@ class Constraints:
                 l1_norm_constraint_mat[constraint_idx, slack_idx] = -1./omega
                 l1_norm_upper_bound[constraint_idx] = delta + penum_mat[penum_index, :] @ X[6:, time_idx]
         # -t <= 0
-        slack_idx0 = model._n_x*model._N + model._n_u*(model._N-1)  
-        slack_constraint_mat[:, slack_idx0:slack_idx0+model._N] = -np.eye(nb_slack_constraints)
+        slack_idx0 = model._n_x*(model._N+1) + model._n_u*(model._N)  
+        slack_constraint_mat[:, slack_idx0:slack_idx0+model._N+1] = -np.eye(nb_slack_constraints)
         # stack up all constraints
         #self._constraints_matrix = l1_norm_constraint_mat
         self._constraints_matrix = np.vstack([l1_norm_constraint_mat, slack_constraint_mat])
@@ -317,13 +310,13 @@ if __name__=='__main__':
     initial_constraints = Constraints(model, data, contact_trajectory, 'INITIAL_CONDITIONS')
     final_constraints = Constraints(model, data, contact_trajectory, 'FINAL_CONDITIONS')
     dynamics_constraints = Constraints(model, data, contact_trajectory, 'DYNAMICS')
-    #com_reachability_constraints = Constraints(model, data, contact_trajectory, 'COM_REACHABILITY')
+    com_reachability_constraints = Constraints(model, data, contact_trajectory, 'COM_REACHABILITY')
     trust_region_constraints = Constraints(model, data, contact_trajectory, 'CONTROL_TRUST_REGION')
     A_ineq_initial_conditions = initial_constraints._constraints_matrix
     A_ineq_dynamics = dynamics_constraints._constraints_matrix
     A_ineq_final_conditions = final_constraints._constraints_matrix
     A_ineq_all_dynamics = np.vstack([A_ineq_initial_conditions,  A_ineq_dynamics, A_ineq_final_conditions]) 
-    #A_ineq_com_reachability = com_reachability_constraints._constraints_matrix
+    A_ineq_com_reachability = com_reachability_constraints._constraints_matrix
     A_ineq_cop = cop_constraints._constraints_matrix
     A_ineq_unilateral = unilateral_constraints._constraints_matrix
     A_ineq_trust_region = trust_region_constraints._constraints_matrix 
@@ -344,10 +337,10 @@ if __name__=='__main__':
         for x in it:
             if x[...] != 0:
                 x[...] = 1            
-    # with np.nditer(A_ineq_com_reachability, op_flags=['readwrite']) as it:
-    #     for x in it:
-    #         if x[...] != 0:
-    #             x[...] = 1            
+    with np.nditer(A_ineq_com_reachability, op_flags=['readwrite']) as it:
+        for x in it:
+            if x[...] != 0:
+                x[...] = 1            
     with np.nditer(A_ineq_unilateral, op_flags=['readwrite']) as it:
         for x in it:
             if x[...] != 0:
@@ -360,7 +353,6 @@ if __name__=='__main__':
          for x in it:
              if x[...] != 0:
                  x[...] = 1
-    plt.figure()                      
     plt.figure()
     plt.grid()
     plt.suptitle('Structure of A_ineq matrix of COP')
@@ -396,16 +388,15 @@ if __name__=='__main__':
     plt.suptitle('Structure of A_ineq matrix of trust region')
     plt.imshow(A_ineq_trust_region, cmap='Greys', extent =[0,A_ineq_trust_region.shape[1],
                 A_ineq_trust_region.shape[0],0], interpolation = 'nearest')  
-    # plt.figure()
-    # plt.grid()
-    # plt.suptitle('Structure of A_ineq matrix of com_z reachability')
-    # plt.imshow(A_ineq_com_reachability, cmap='Greys', extent =[0,A_ineq_com_reachability.shape[1],
-    #             A_ineq_com_reachability.shape[0],0], interpolation = 'nearest')      
-    plt.show()
+    plt.figure()
+    plt.grid()
+    plt.suptitle('Structure of A_ineq matrix of com_z reachability')
+    plt.imshow(A_ineq_com_reachability, cmap='Greys', extent =[0,A_ineq_com_reachability.shape[1],
+                A_ineq_com_reachability.shape[0],0], interpolation = 'nearest')      
 
-    # plt.figure()
-    # plt.grid()
-    # plt.suptitle('Structure of A_ineq matrix of all dynamics constraints')
-    # plt.imshow(A_ineq_all_dynamics, cmap='Greys', extent =[0, A_ineq_all_dynamics[1],
-    #              A_ineq_all_dynamics.shape[0],0], interpolation = 'nearest')      
-    # plt.show()  
+    plt.figure()
+    plt.grid()
+    plt.suptitle('Structure of A_ineq matrix of all dynamics constraints')
+    plt.imshow(A_ineq_all_dynamics, cmap='Greys', extent =[0, A_ineq_all_dynamics.shape[1],
+                 A_ineq_all_dynamics.shape[0],0], interpolation = 'nearest')      
+    plt.show()  

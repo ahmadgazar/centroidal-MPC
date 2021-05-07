@@ -23,32 +23,32 @@ class trajectory_data():
         n_x = model._n_x
         n_u, n_p, N = model._n_u, model._n_p, model._N
         self.model = model 
-        self.dynamics = np.zeros((n_x, N-1))
+        self.dynamics = np.zeros((n_x, N))
         self.feedback_gains =  np.zeros((N, n_u, n_x))
-        self.gradients = {'f_x':np.zeros((n_x*n_x, N-1)),
-                'f_u':np.zeros((n_x*n_u, N-1)),
-                'f_w':np.zeros((n_x*n_p, N-1)),
-                'f_xx':np.zeros((n_x*n_x*n_x, N-1)),
-                'f_ux':np.zeros((n_x*n_u*n_x, N-1)),
-                'f_wx':np.zeros((n_x*n_p*n_x, N-1)),
-                'f_xu':np.zeros((n_x*n_x*n_u, N-1)),
-                'f_uu':np.zeros((n_x*n_u*n_u, N-1)),
-                'f_wu':np.zeros((n_x*n_p*n_u, N-1))}
+        self.gradients = {'f_x':np.zeros((n_x*n_x, N)),
+                'f_u':np.zeros((n_x*n_u, N)),
+                'f_w':np.zeros((n_x*n_p, N)),
+                'f_xx':np.zeros((n_x*n_x*n_x, N)),
+                'f_ux':np.zeros((n_x*n_u*n_x, N)),
+                'f_wx':np.zeros((n_x*n_p*n_x, N)),
+                'f_xu':np.zeros((n_x*n_x*n_u, N)),
+                'f_uu':np.zeros((n_x*n_u*n_u, N)),
+                'f_wu':np.zeros((n_x*n_p*n_u, N))}
         self.contact_trajectory = contact_trajectory
-        self.previous_trajectories = {'state':np.zeros(shape=[n_x, N]),
-                                    'control':np.zeros(shape=[n_u, N-1])}
+        self.previous_trajectories = {'state':np.zeros(shape=[n_x, N+1]),
+                                    'control':np.zeros(shape=[n_u, N])}
         self.__initialize_state_and_control_trajectories()  
     
     def __initialize_state_and_control_trajectories(self): 
         N = self.model._N   
         x_init = self.model._x_init
         x_final = self.model._x_final 
-        for time_idx in range(N):
-            alpha1 = ((N-1) - time_idx) / (N-1)
-            alpha2 =          time_idx  / (N-1)
+        for time_idx in range(N+1):
+            alpha1 = (N - time_idx) / N
+            alpha2 =      time_idx  / N
             self.previous_trajectories['state'][:, time_idx] = x_init * alpha1 + x_final * alpha2 + 1e-4    
 
-        for time_idx in range(N-1):
+        for time_idx in range(N):
             # both feet in contact
             if self.contact_trajectory['RF'][time_idx] and self.contact_trajectory['LF'][time_idx]:
                 self.previous_trajectories['control'][4, time_idx] = -0.5*(self.model._m*self.model._g)#fz_rf
@@ -65,7 +65,7 @@ class trajectory_data():
     def evaluate_dynamics_and_gradients(self, X, U):
         N = self.model._N
         contact_trajectory = self.contact_trajectory
-        for k in range(N-1):
+        for k in range(N):
             x_k = X[:,k]
             u_k = U[:,k]
             if contact_trajectory['LF'][k]:

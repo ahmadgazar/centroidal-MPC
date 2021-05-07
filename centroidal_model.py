@@ -1,5 +1,5 @@
 # headers
-from optimizer import Control_optimizer, Dynamics_optimizer, Slack_optimizer
+from optimizer import Control_optimizer, Dynamics_optimizer, Slack_optimizer, State_optimizer
 import numpy as np
 import sympy as sp
 import conf
@@ -18,8 +18,8 @@ class bipedal_centroidal_model:
         self._n_p = 2*3  #w = [pr_x, pr_y, pr_z, pl_x, pl_y, pl_z] additive noise on contact locations 
         self._n_t = 1
         self._N = conf.N 
-        self._total_nb_optimizers = self._n_x*self._N + self._n_u*(self._N-1) + \
-                                    self._n_t*(self._N) + self._n_t*(self._N-1)
+        self._total_nb_optimizers = self._n_x*(self._N+1) + self._n_u*self._N + \
+                                    self._n_t*(self._N+1) + self._n_t*self._N
         self._x_init = conf.x_init 
         self._x_final = conf.x_final  
         self._m = conf.robot_mass        # total robot mass
@@ -32,6 +32,8 @@ class bipedal_centroidal_model:
         self._Q = conf.Q
         self._R = conf.R
         self._optimizers_objects = {
+            'com_z': State_optimizer('com_z', self._n_x, self._N),
+            'lin_mom_z': State_optimizer('lin_mom_z', self._n_x, self._N),
              'cop_x_rf':Control_optimizer('cop_x_rf', self._n_x, self._n_u, self._N),
              'cop_y_rf':Control_optimizer('cop_y_rf', self._n_x, self._n_u, self._N),
                 'fx_rf':Control_optimizer('fx_rf', self._n_x, self._n_u, self._N),
@@ -131,8 +133,8 @@ class bipedal_centroidal_model:
     
     def evaluate_dynamics(self, X, U, contact_trajectory):
         N = self._N
-        f = np.zeros((self._n_x, N-1))
-        for k in range(N-1):
+        f = np.zeros((self._n_x, N))
+        for k in range(N):
             x_k = X[:,k]
             u_k = U[:,k]
             if contact_trajectory['LF'][k]:

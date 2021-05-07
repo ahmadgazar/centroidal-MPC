@@ -5,7 +5,7 @@ class Cost:
         self.data = data
         self.model = model
         self.N = model._N
-        self._nb_slack_optimizers = model._n_t*(self.N-1) 
+        self._nb_slack_optimizers = model._n_t*(self.N) 
         self._total_nb_optimizers = model._total_nb_optimizers
         self._COST_IDENTIFIER = COST_IDENTIFIER  
         self._contact_trajectory = contact_trajectory
@@ -36,10 +36,9 @@ class Cost:
     def __construct_total_cost(self, model):
         N = self.N
         running_state_cost, control_cost = model._state_cost_weights, model._control_cost_weights
-        terminal_state_cost = np.zeros((model._n_x, model._n_x))
-        self._hessian += sparse.block_diag([sparse.kron(np.eye(N-1), running_state_cost), 
-                            terminal_state_cost, sparse.kron(np.eye(N-1), control_cost),
-                            np.zeros((N, N)),np.zeros((N-1, N-1))], format='csc')
+        self._hessian += sparse.block_diag([sparse.kron(np.eye(N+1), running_state_cost), 
+                         sparse.kron(np.eye(N), control_cost), np.zeros((N+1, N+1)),
+                                                   np.zeros((N, N))], format='csc')
 
     def __construct_com_cost(self, model):
         optimizer_object = self._cost_related_optimizers
@@ -48,17 +47,13 @@ class Cost:
             com_x_cost_idx = optimizer_object._x_idx_vector[time_idx]
             self._gradient[com_x_cost_idx:com_x_cost_idx+model._n_x] = com_tracking_traj[:, time_idx]
 
-    def __construct_terminal_cost(self, model):
-        nx, N = model._n_x, model._N
-        self._hessian[nx*(N-1):nx*(N-1)+nx, nx*(N-1):nx*(N-1)+nx] = model._cost_weights['terminal_state']
-
     """
     L1 norm penalty cost on the state trust region
     """
     def __construct_state_trust_region_cost(self, model):
         nx, nu, N = model._n_x, model._n_u, model._N
-        state_slack_idx_0 = nx*N + nu*(N-1)
-        self._gradient[state_slack_idx_0:state_slack_idx_0+N] = np.ones(N)
+        state_slack_idx_0 = nx*(N+1) + nu*N
+        self._gradient[state_slack_idx_0:state_slack_idx_0+N+1] = np.ones(N+1)
 
     """
     L1 norm penalty cost on the control trust region

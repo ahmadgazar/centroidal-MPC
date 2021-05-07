@@ -71,7 +71,7 @@ class SCP:
             elif constraint_object._CONSTRAINT_IDENTIFIER == 'STATE_TRUST_REGION':
                 print('adding state trust region constraints ...')
                 delta, omega = self.trust_region_updates['radius'], self.trust_region_updates['weight'] 
-                constraint_object.construct_state_trust_region_constraints(self.data, omega, delta)
+                constraint_object.construct_state_trust_region_constraints(self.model, self.data, omega, delta)
         self.__stack_up_all_constraints()    
         self.prob.update(Ax=self._A.data, l=self._l, u=self._u)    
 
@@ -82,7 +82,7 @@ class SCP:
             Q+= cost_object._hessian
             p+= cost_object._gradient
         # padding to avoid singularities with hessian        
-        Q[0:self.n_x*self.N-1, 0:self.n_x*self.N-1] = 10e-6*np.eye(self.n_x*self.N-1)
+        #Q[0:self.n_x*self.N-1, 0:self.n_x*self.N-1] = 10e-6*np.eye(self.n_x*self.N-1)
         self._Q, self._p = sparse.csc_matrix(Q), p
     
     # trust region 
@@ -124,8 +124,8 @@ class SCP:
 
     def __get_QP_solution(self):
         n_x, n_u, N = self.n_x, self.n_u, self.N
-        X_sol = np.reshape(self.res.x[:n_x*N], (n_x, N), order='F')
-        U_sol = np.reshape(self.res.x[n_x*N:self.total_nb_optimizers-(2*N-1)], (n_u, N-1), order='F')
+        X_sol = np.reshape(self.res.x[:n_x*(N+1)], (n_x, N+1), order='F')
+        U_sol = np.reshape(self.res.x[n_x*(N+1):n_x*(N+1)+n_u*N], (n_u, N), order='F')
         return X_sol, U_sol
     
     def solve_scp(self):
