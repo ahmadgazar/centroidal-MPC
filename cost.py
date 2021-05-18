@@ -38,14 +38,14 @@ class Cost:
         running_state_cost, control_cost = model._state_cost_weights, model._control_cost_weights
         self._hessian += sparse.block_diag([sparse.kron(np.eye(N+1), running_state_cost), 
                          sparse.kron(np.eye(N), control_cost), np.zeros((N+1, N+1)),
-                                                   np.zeros((N, N))], format='csc')
+                                                   np.zeros((N, N))])
 
     def __construct_com_cost(self, model):
         optimizer_object = self._cost_related_optimizers
         com_tracking_traj = self.data.init_trajectories['state']
-        for time_idx in range(self.N):
+        for time_idx in range(self.N+1):
             com_x_cost_idx = optimizer_object._x_idx_vector[time_idx]
-            self._gradient[com_x_cost_idx:com_x_cost_idx+model._n_x] = com_tracking_traj[:, time_idx]
+            self._gradient[com_x_cost_idx:com_x_cost_idx+3] = com_tracking_traj[:3, time_idx]
 
     """
     L1 norm penalty cost on the state trust region

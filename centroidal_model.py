@@ -21,13 +21,16 @@ class bipedal_centroidal_model:
         self._total_nb_optimizers = self._n_x*(self._N+1) + self._n_u*self._N + \
                                     self._n_t*(self._N+1) + self._n_t*self._N
         self._x_init = conf.x_init 
-        self._x_final = conf.x_final  
+        self._x_final = conf.x_final 
+        self._com_z = conf.com_z 
         self._m = conf.robot_mass        # total robot mass
         self._g = conf.gravity_constant  # gravity constant
         self._dt = conf.dt               # discretization time
+        self._contact_time = conf.contact_knots
         self._state_cost_weights = conf.state_cost_weights #state weight
         self._control_cost_weights = conf.control_cost_weights #control weight    
         self._f = sp.zeros(self._n_x, 1)  #dynamics
+        self._linear_friction_coefficient = conf.mu
         self._scp_params = conf.scp_params
         self._Q = conf.Q
         self._R = conf.R

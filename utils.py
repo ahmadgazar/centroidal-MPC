@@ -5,15 +5,16 @@ def normalize(v):
     assert(v.shape[0] == 3)
     return v/np.linalg.norm(v)
 
-def construct_friction_pyramid_constraint_matrix(self):
-    pyramid_constraint_matrix = np.zeros((3,3))
-    pyramid_constraints_vector = normalize(np.array([0.5*np.sqrt(2), 0.5*np.sqrt(2), -self.__linear_friction_coefficient]))
-    pyramid_rotation_matrix = np.array([[np.cos(2*np.pi/4), -np.sin(2*np.pi/4), 0],
-                                        [np.sin(2*np.pi/4), np.cos(2*np.pi/4) , 0],
-                                        [0                , 0                 , 1]])
+def construct_friction_pyramid_constraint_matrix(model):
+    pyramid_constraint_matrix = np.zeros((4,3))
+    angle  = 2*(np.pi/4)
+    pyramid_constraints_vector = normalize(np.array([0.5*np.sqrt(2), 0.5*np.sqrt(2), -model._linear_friction_coefficient]))
+    pyramid_rotation_matrix = np.array([[np.cos(angle), -np.sin(angle), 0.],
+                                        [np.sin(angle), np.cos(angle) , 0.],
+                                        [0.               , 0.        , 1.]])
     rotated_pyramid_vector = pyramid_rotation_matrix @ pyramid_constraints_vector
-    for i in range(3):
-        pyramid_constraint_matrix[i,::] = rotated_pyramid_vector 
+    for i in range(4):
+        pyramid_constraint_matrix[i,:] = rotated_pyramid_vector 
     return pyramid_constraint_matrix
 
 def plot_state(self):

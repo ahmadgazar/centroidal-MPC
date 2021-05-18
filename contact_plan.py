@@ -4,17 +4,18 @@ import numpy as np
 import pinocchio as pin
 from numpy.linalg import norm
 import conf
-class debris():
+
+class Debris():
     def __init__(self, i, j, altitude, axis, angle, ACTIVE_CONTACT):
         """
         Minimal helper function: return the SE3 configuration of a stepstone, with some
         ad-hoc configuration.
         """
         # i,j are integers (x, y)
-        # altitude is the altitude in centimer (z)
+        # altitude is the altitude in meter (z)
         # axis is 2D, rotation axis in the plane
         # angle is the angle of inclination, in radian
-        STEP = 0.5
+        STEP = 1.0
         axis = np.array(axis, np.float64)
         axis /= norm(axis)
         self.axis = axis
@@ -54,42 +55,45 @@ def addTerrainsToGeomModel(gmodel, terrain, obstacles):
     
 # given a contact plan, fill a contact trajectory    
 def create_contact_trajectory(conf):
-        terrain  = conf.terrain 
-        contact_knots = conf.contact_knots
-        contact_trajectory = {'RF':[], 'LF':[]}
-        for i in range(contact_knots):
-            contact_trajectory['RF'].append(terrain[0])
-            contact_trajectory['LF'].append(terrain[1])
-        for idx in range(len(terrain)-2):
-            if terrain[idx+2].ACTIVE_CONTACT=='RF': 
-               for j in range(contact_knots):
-                   contact_trajectory['RF'].append(terrain[idx+2])
-                   contact_trajectory['LF'].append(None)
-            elif terrain[idx+2].ACTIVE_CONTACT=='LF':
-                for k in range(contact_knots):
-                    contact_trajectory['LF'].append(terrain[idx+2]) 
-                    contact_trajectory['RF'].append(None)  
-        return contact_trajectory
+    contact_sequence = conf.contact_sequence 
+    contact_duration = conf.contact_knots
+    contact_trajectory = {'RF':[], 'LF':[]}
+    for contacts in contact_sequence:
+        for contact_idx, contact in enumerate (contacts): 
+            for time in range(contact_duration):
+                if not contact:
+                    if contact_idx == 0:
+                        contact_trajectory['LF'].append(None)
+                    elif contact_idx == 1:
+                        contact_trajectory['RF'].append(None)    
+                elif contact.ACTIVE_CONTACT=='RF': 
+                    contact_trajectory['RF'].append(contact)
+                elif contact.ACTIVE_CONTACT=='LF':
+                    contact_trajectory['LF'].append(contact)
+    return contact_trajectory                
 
 if __name__=='__main__':
     
     # Obstacle is a list of 3D sphere obstacle. They are defined by their sphere centers.
-    obstacles = [
-        np.array([.5, .3, 1.1]),
-        np.array([-.3, -.6, 1.4]),
-        ]
+    # obstacles = [
+    #     np.array([.5, .3, 1.1]),
+    #     np.array([-.3, -.6, 1.4]),
+    #     ]
     # The viewer should be initialized after adding the terrain to the robot
     # otherwise, the terrain will not be displayed.
     # --- Load robot model
-    robot = robex.load('talos')
-    addTerrainsToGeomModel(robot.collision_model, conf.terrain, obstacles)
-    addTerrainsToGeomModel(robot.visual_model, conf.terrain, obstacles)
-    Viewer = pin.visualize.GepettoVisualizer
-    viz = Viewer(robot.model, robot.collision_model, robot.visual_model)
-    viz.initViewer(loadModel=True)
-    viz.display(robot.q0)
-    #rmodel = robot.model
-    #rdata = rmodel.createData()
-    #contact_trajectory = create_contact_trajectory(conf)
+    # robot = robex.load('talos')
+    # addTerrainsToGeomModel(robot.collision_model, conf.terrain, obstacles)
+    # addTerrainsToGeomModel(robot.visual_model, conf.terrain, obstacles)
+    # Viewer = pin.visualize.GepettoVisualizer
+    # viz = Viewer(robot.model, robot.collision_model, robot.visual_model)
+    # viz.initViewer(loadModel=True)
+    # viz.display(robot.q0)
+    contact_trajectory = create_contact_trajectory(conf)
+    for contact in contact_trajectory['RF']: 
+        if contact:
+            print(contact.pose.rotation)
+        else:
+            print(contact)
    
 

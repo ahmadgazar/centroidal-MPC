@@ -79,15 +79,16 @@ class Dynamics_optimizer():
         self.nx = nx_optimizers
         self.nu = nu_optimizers
         self.N = horizon_length
-        self._x_idx_vector = np.zeros(self.N, dtype=int)
+        self._x_idx_vector = np.zeros(self.N+1, dtype=int)
         self._u_idx_vector = np.zeros(self.N, dtype=int)
         self.__fill_optimizer_params() 
     
     def __fill_optimizer_params(self):
         if self._name == 'dynamics':
-            for time_index in range(self.N):
+            for time_index in range(self.N+1):
                 self._x_idx_vector[time_index] = time_index*self.nx
-                self._u_idx_vector[time_index] = self.nx*(self.N+1) + time_index*self.nu
+                if time_index < self.N:
+                    self._u_idx_vector[time_index] = self.nx*(self.N+1) + time_index*self.nu
         else: print('this not a dynamics optimizer name !')    
             
 class Slack_optimizer():

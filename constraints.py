@@ -1,6 +1,7 @@
 import numpy as np 
 import matplotlib.pyplot as plt 
 from scipy import sparse
+from utils import construct_friction_pyramid_constraint_matrix
 
 class Constraints:
     def __init__(self, model, data, contact_trajectory, CONSTRAINT_IDENTIFIER):
@@ -55,7 +56,17 @@ class Constraints:
                                                          model._optimizers_objects['fy_lf'],
                                                          model._optimizers_objects['fz_lf']]}
             self.construct_unilaterality_constraints()
-        
+
+        elif self._CONSTRAINT_IDENTIFIER == 'FRICTION_PYRAMID':
+            # pre-allocate memory
+            self._constraint_related_optimizers = {'RF':[model._optimizers_objects['fx_rf'], 
+                                                         model._optimizers_objects['fy_rf'],
+                                                         model._optimizers_objects['fz_rf']],
+                                                   'LF':[model._optimizers_objects['fx_lf'], 
+                                                         model._optimizers_objects['fy_lf'],
+                                                         model._optimizers_objects['fz_lf']]}
+            self.construct_friction_pyramid_constraints(model)
+                                             
         elif self._CONSTRAINT_IDENTIFIER == 'CONTROL_TRUST_REGION':
             self._constraint_related_optimizers = model._optimizers_objects['control_slack']
             omega, delta = model._scp_params['omega0'], model._scp_params['trust_region_radius0'] 
@@ -75,11 +86,8 @@ class Constraints:
         nb_x, nb_u = model._n_x, model._n_u
         x_index_vector = self._constraint_related_optimizers._x_idx_vector
         u_index_vector = self._constraint_related_optimizers._u_idx_vector
-        X_traj, X_plus_traj = np.copy(data.previous_trajectories['state']), np.copy(data.dynamics) 
-        #print('previous state trajectory = ', X_traj)
-        #print('f = ', X_plus_traj)       
+        X_traj, X_plus_traj = np.copy(data.previous_trajectories['state']), np.copy(data.dynamics)       
         U_traj = np.copy(data.previous_trajectories['control'])
-        #print('previous control trajectory = ', U_traj)
         A_traj, B_traj = np.copy(data.gradients['f_x']), np.copy(data.gradients['f_u'])
         for time_idx in range(self.N):
             x_k, x_k_plus, u_k = X_traj[:, time_idx], X_plus_traj[:, time_idx], U_traj[:, time_idx]
@@ -98,23 +106,19 @@ class Constraints:
             self._upper_bound[x_index_k:x_index_k+nb_x] = linearized_dynamics + 1e-5
 
     """
-    TODO: properly for a wallking motion 
+    TODO: properly for a wallking motion with step timing-adjustment 
     """
     def construct_com_reachability_constraints(self):
-        optimizer_object = self._constraint_related_optimizers  
-        for time_idx in range(self.N+1):
-            optimizer_idx = optimizer_object._optimizer_idx_vector[time_idx]
-            self._constraints_matrix[time_idx, optimizer_idx] = 1.0
-            self._lower_bound[time_idx] = 0.88 
-            self._upper_bound[time_idx] = 0.88                   
+        return 0.
+
     """
     TODO: construct a control invariant set in the future for MPC to guarantee recursive feasibility 
     """
     def construct_final_constraints(self, model):
         self._constraints_matrix = np.hstack([np.zeros((self.nx, self.nx*(self.N))), 
                         np.eye(self.nx), np.zeros((self.nx, self.n_all-self.nx*(self.N+1)))])
-        self._lower_bound = model._x_final - 5e-5
-        self._upper_bound = model._x_final + 5e-5
+        self._lower_bound = model._x_final #- 5e-5
+        self._upper_bound = model._x_final #+ 5e-5
     
     def construct_cop_constraints(self):
         # pre-allocate memory
@@ -165,6 +169,9 @@ class Constraints:
         self._lower_bound = np.hstack([l_x_rf, l_y_rf, l_x_lf, l_y_lf])
         self._upper_bound = np.hstack([u_x_rf, u_y_rf, u_x_lf, u_y_lf])
     
+    """
+    use only if you are walking on a flat terrain
+    """
     def construct_unilaterality_constraints(self):
         # pre-allocate memory
         Aineq_fz_rf = np.zeros((self.N, self.n_all))
@@ -178,14 +185,14 @@ class Constraints:
         for time_idx in range(self.N):       
             # Right foot unilateral constraint
             if self.contact_trajectory['RF'][time_idx]:
-                contact_rotation_rf = self.contact_trajectory['RF'][time_idx].pose.rotation
+                contact_rotation_rf = self.contact_trajectory['RF'][time_idx].pose.rotation.T
                 contact_normal_rf = contact_rotation_rf[:,2]
                 for x_y_z_idx, optimizer_object in enumerate(optimizer_objects_rf):  
                     optimizer_idx = optimizer_object._optimizer_idx_vector[time_idx]
                     Aineq_fz_rf[time_idx, optimizer_idx] = contact_normal_rf[x_y_z_idx]
             # Left foot unilateral constraint
             if self.contact_trajectory['LF'][time_idx]:
-                contact_rotation_lf = self.contact_trajectory['LF'][time_idx].pose.rotation
+                contact_rotation_lf = self.contact_trajectory['LF'][time_idx].pose.rotation.T
                 contact_normal_lf = contact_rotation_lf[:, 2]
                 for x_y_z_idx, optimizer_object in enumerate (optimizer_objects_lf): 
                     optimizer_idx = optimizer_object._optimizer_idx_vector[time_idx]
@@ -193,6 +200,35 @@ class Constraints:
         self._constraints_matrix = np.vstack([Aineq_fz_rf, Aineq_fz_lf])
         self._upper_bound = np.hstack([u_fz_rf,  u_fz_lf])
         self._lower_bound = np.hstack([l_fz_rf,  l_fz_lf])             
+
+    def construct_friction_pyramid_constraints(self, model):
+        # pre-allocate memory
+        Aineq_rf = np.zeros((4*self.N, self.n_all))
+        Aineq_lf = np.zeros((4*self.N, self.n_all))
+        friction_pyramid_mat = construct_friction_pyramid_constraint_matrix(model)
+        contact_trajectory = self.contact_trajectory
+        optimizer_objects_rf = self._constraint_related_optimizers['RF'] 
+        optimizer_objects_lf = self._constraint_related_optimizers['LF']
+        for time_idx in range(self.N):        
+            #--------------------- right foot constraints ----------------------
+            if contact_trajectory['RF'][time_idx]:
+                contact_rotation_rf = contact_trajectory['RF'][time_idx].pose.rotation
+                rotated_friction_pyramid_mat_rf = friction_pyramid_mat @ contact_rotation_rf.T
+                for constraint_idx in range(rotated_friction_pyramid_mat_rf.shape[0]):
+                    for x_y_z_idx, optimizer_object in enumerate(optimizer_objects_rf):  
+                        optimizer_idx = optimizer_object._optimizer_idx_vector[time_idx]
+                        Aineq_rf[time_idx, optimizer_idx] = rotated_friction_pyramid_mat_rf[constraint_idx, x_y_z_idx]
+            #--------------------- left foot local constraints -----------------
+            if contact_trajectory['LF'][time_idx]:
+                contact_rotation_lf = contact_trajectory['LF'][time_idx].pose.rotation
+                rotated_friction_pyramid_mat_lf = friction_pyramid_mat @ contact_rotation_lf.T       
+                for constraint_idx in range(rotated_friction_pyramid_mat_lf.shape[0]):
+                    for x_y_z_idx, optimizer_object in enumerate(optimizer_objects_lf):  
+                        optimizer_idx = optimizer_object._optimizer_idx_vector[time_idx]
+                        Aineq_lf[time_idx, optimizer_idx] = rotated_friction_pyramid_mat_lf[constraint_idx,x_y_z_idx]  
+        self._constraints_matrix = np.vstack([Aineq_rf, Aineq_lf])
+        self._lower_bound = -np.inf*np.ones(4*self.N) 
+        self._upper_bound = np.zeros(4*self.N)
 
     """
     control trust region constraints based on l1-norm exact penalty method
@@ -286,7 +322,6 @@ class Constraints:
         slack_idx0 = model._n_x*(model._N+1) + model._n_u*(model._N)  
         slack_constraint_mat[:, slack_idx0:slack_idx0+model._N+1] = -np.eye(nb_slack_constraints)
         # stack up all constraints
-        #self._constraints_matrix = l1_norm_constraint_mat
         self._constraints_matrix = np.vstack([l1_norm_constraint_mat, slack_constraint_mat])
         self._upper_bound = np.hstack([l1_norm_upper_bound, slack_upper_bound])
         self._lower_bound = np.hstack([l1_norm_lower_bound, slack_lower_bound])     

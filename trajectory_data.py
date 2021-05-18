@@ -19,7 +19,7 @@ def compute_lqr_feedback_gain(A, B, Q, R, niter=5):
 
 class trajectory_data():
     # constructor
-    def __init__(self, model, contact_trajectory):
+    def __init__(self, model, contact_sequence, contact_trajectory):
         n_x = model._n_x
         n_u, n_p, N = model._n_u, model._n_p, model._N
         self.model = model 
@@ -34,32 +34,63 @@ class trajectory_data():
                 'f_xu':np.zeros((n_x*n_x*n_u, N)),
                 'f_uu':np.zeros((n_x*n_u*n_u, N)),
                 'f_wu':np.zeros((n_x*n_p*n_u, N))}
+        self.contact_sequence = contact_sequence
         self.contact_trajectory = contact_trajectory
         self.previous_trajectories = {'state':np.zeros(shape=[n_x, N+1]),
                                     'control':np.zeros(shape=[n_u, N])}
         self.__initialize_state_and_control_trajectories()  
     
     def __initialize_state_and_control_trajectories(self): 
-        N = self.model._N   
-        x_init = self.model._x_init
-        x_final = self.model._x_final 
-        for time_idx in range(N+1):
-            alpha1 = (N - time_idx) / N
-            alpha2 =      time_idx  / N
-            self.previous_trajectories['state'][:, time_idx] = x_init * alpha1 + x_final * alpha2 + 1e-4    
-
+        contact_trajectory, com_z, N = self.contact_trajectory, self.model._com_z, self.model._N 
         for time_idx in range(N):
-            # both feet in contact
-            if self.contact_trajectory['RF'][time_idx] and self.contact_trajectory['LF'][time_idx]:
-                self.previous_trajectories['control'][4, time_idx] = -0.5*(self.model._m*self.model._g)#fz_rf
-                self.previous_trajectories['control'][10, time_idx] = -0.5*(self.model._m*self.model._g)#fz_lf   
-            # only RF in contact
-            elif self.contact_trajectory['RF'][time_idx] and not self.contact_trajectory['LF'][time_idx]:
-                self.previous_trajectories['control'][4, time_idx] = -self.model._m*self.model._g #fz_rf
-            # only LF in contact
-            elif self.contact_trajectory['LF'][time_idx] and not self.contact_trajectory['RF'][time_idx]:
-                self.previous_trajectories['control'][10, time_idx] = -self.model._m*self.model._g #fz_lf     
-        #self.previous_trajectories['control'] += 1e-7    
+            contact_rf = contact_trajectory['RF'][time_idx]
+            contact_lf = contact_trajectory['LF'][time_idx]
+            # LF active and RF not active
+            if contact_lf and not contact_rf:
+                self.previous_trajectories['state'][:, time_idx] = np.array([contact_lf.pose.translation[0],
+                                                                             contact_lf.pose.translation[1], 
+                                                                       com_z+contact_lf.pose.translation[2], 
+                                                                                    0., 0., 0., 0., 0., 0.])
+            # RF active and LF not active
+            elif contact_rf and not contact_lf:    
+                self.previous_trajectories['state'][:, time_idx] = np.array([contact_rf.pose.translation[0], 
+                                                                             contact_rf.pose.translation[1],
+                                                                       com_z+contact_rf.pose.translation[2],   
+                                                                                    0., 0., 0., 0., 0., 0.])                  
+            # RF active and LF active                                                                                                  
+            elif contact_rf and contact_lf:    
+                self.previous_trajectories['state'][:, time_idx] = np.array([0.5*(contact_rf.pose.translation[0]+contact_lf.pose.translation[0]), 
+                                                                             0.5*(contact_rf.pose.translation[1]+contact_lf.pose.translation[1]), 
+                                                                       0.5*(contact_rf.pose.translation[2]+contact_lf.pose.translation[2])+com_z, 
+                                                                                                                         0., 0., 0., 0., 0., 0.])                                      
+        self.previous_trajectories['state'][:, -1] = self.previous_trajectories['state'][:, -2]
+        
+        for time_idx in range(N):
+            """
+            uncomment if you want to warm start the control trajectory with a normal contact force f_z 
+            otherwise let the solver figure it out
+            """
+            # f_max_weight_local = np.array([0., 0., -self.model._m*self.model._g])
+            # f_half_weight_local = np.array([0., 0., -0.5*(self.model._m*self.model._g)])
+            # # both feet in contact
+            # if self.contact_trajectory['RF'][time_idx] and self.contact_trajectory['LF'][time_idx]:
+            #     f_world_rf = self.contact_trajectory['RF'][time_idx].pose.rotation @ f_half_weight_local
+            #     print("f_world_rf", f_world_rf)
+            #     f_world_lf = self.contact_trajectory['LF'][time_idx].pose.rotation @ f_half_weight_local
+            #     print("f_world_lf", f_world_lf)
+            #     self.previous_trajectories['control'][4,  time_idx] = f_world_rf[2] #fz_rf
+            #     self.previous_trajectories['control'][10, time_idx] = f_world_lf[2] #fz_lf   
+            # # only RF in contact, and it was previously in contact
+            # elif self.contact_trajectory['RF'][time_idx] and not self.contact_trajectory['LF'][time_idx]:
+            #     f_world_rf = self.contact_trajectory['RF'][time_idx].pose.rotation @ f_max_weight_local
+            #     self.previous_trajectories['control'][4, time_idx]  = f_world_rf[2]  #fz_rf
+            #     self.previous_trajectories['control'][10, time_idx] = 0.             #fz_lf   
+            # # only LF in contact, and it was previously in contact
+            # elif self.contact_trajectory['LF'][time_idx] and not self.contact_trajectory['RF'][time_idx]:
+            #     f_world_lf = self.contact_trajectory['LF'][time_idx].pose.rotation @ f_max_weight_local
+            #     self.previous_trajectories['control'][4, time_idx] = 0.            #fz_rf
+            #     self.previous_trajectories['control'][10,time_idx] = f_world_lf[2]  #fz_lf  
+            self.previous_trajectories['control']+= 1e-7    
         self.init_trajectories = self.previous_trajectories.copy() 
 
     def evaluate_dynamics_and_gradients(self, X, U):
@@ -79,7 +110,7 @@ class trajectory_data():
             if contact_trajectory['RF'][k]:
                 RF_ACTIVE=1
                 R_rf = contact_trajectory['RF'][k].pose.rotation
-                p_rf = contact_trajectory['RF'][k].pose.translation.reshape(3,1)  
+                p_rf = contact_trajectory['RF'][k].pose.translation.reshape(3,1) 
             else:
                 RF_ACTIVE=0
                 R_rf = np.zeros((3,3))
@@ -97,5 +128,4 @@ class trajectory_data():
             #self.gradients['f_xu'][:,k] = self.model._A_du(x_k, u_k, RF_ACTIVE, R_rf, p_rf, LF_ACTIVE, R_lf, p_lf).flatten(order='F')
             #self.gradients['f_uu'][:,k] = self.model._B_du(x_k, u_k, RF_ACTIVE, R_rf, p_rf, LF_ACTIVE, R_lf, p_lf).flatten(order='F')
             #self.gradients['f_wu'][:,k] = self.model._C_du(x_k, u_k, RF_ACTIVE, R_rf, p_rf, LF_ACTIVE, R_lf, p_lf).flatten(order='F')
-        #print('dynamics = ', self.dynamics)
                 
