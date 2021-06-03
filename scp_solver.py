@@ -1,8 +1,7 @@
-import osqp 
-import numpy as np
-from scipy import sparse
 from warnings import warn
-import matplotlib.pyplot as plt 
+from scipy import sparse
+import numpy as np
+import osqp 
 
 class SCP:
     # constructor
@@ -21,7 +20,7 @@ class SCP:
         self.trust_region_updates = {'radius':self.scp_params['trust_region_radius0'],
                                      'weight':self.scp_params['omega0']}
         self.all_solution = {'state':[], 'control':[]}
-        # Setup QP suproblem using OSQP solver
+        # concatenate costs and constraints
         self.__sum_up_all_costs()
         self.__stack_up_all_constraints()
         print('setting up initial SCP subproblem ..')
@@ -57,12 +56,13 @@ class SCP:
                 constraint_object.construct_final_constraints(self.model)
             elif constraint_object._CONSTRAINT_IDENTIFIER == 'COP':
                 print('adding CoP constraints ...')
-                constraint_object.construct_cop_constraints()
+                constraint_object.construct_cop_constraints(self.model)
             elif constraint_object._CONSTRAINT_IDENTIFIER == 'UNILATERAL':
                 print('adding unilateral constraints ...')
+                constraint_object.construct_unilaterality_constraints(self.model)
             elif constraint_object._CONSTRAINT_IDENTIFIER == 'FRICTION_PYRAMID':
                 print('adding friction pyramid constraints ...')    
-                constraint_object.construct_unilaterality_constraints()
+                constraint_object.construct_friction_pyramid_constraints(self.model)
             elif constraint_object._CONSTRAINT_IDENTIFIER == 'CONTROL_TRUST_REGION':
                 print('adding control trust region constraints ...')
                 delta, omega = self.trust_region_updates['radius'], self.trust_region_updates['weight'] 
@@ -150,11 +150,9 @@ class SCP:
             B_success = False
             # propagate dynamics given previous solutions
             data.evaluate_dynamics_and_gradients(X, U)
-            # updates dynamics constraints and 
             self.__update_all_constraints()
             QP_SOLVED = self.__solve_subproblem()
             X_sol, U_sol = self.__get_QP_solution()
-            #print('X_SOL = ', X_sol)            
             # break out when QP fails 
             if QP_SOLVED == False:
                 print('QP subproblem Failed at iter #' + str(scp_iteration ))

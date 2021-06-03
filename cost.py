@@ -19,20 +19,23 @@ class Cost:
             print('constructing QR cost ..')
         elif self._COST_IDENTIFIER == 'COM_REGULATION':
             print('constructing CoM regulation cost ..')
-            self._cost_related_optimizers = model._optimizers_objects['dynamics']
+            self._cost_related_optimizers = model._state_optimizers_indices['coms'][0]
             self.__construct_com_cost(self.model)
         elif self._COST_IDENTIFIER == 'TERMINAL':
             print('constructing terminal cost ..')
             self.__construct_terminal_cost(self.model)
         elif self._COST_IDENTIFIER == 'STATE_TRUST_REGION':
             print('constructing state trust region cost ..')
-            self._cost_related_optimizers = model._optimizers_objects['state_slack']     
+            self._cost_related_optimizers = model._state_slack_optimizers_indices     
             self.__construct_state_trust_region_cost(self.model)    
         elif self._COST_IDENTIFIER == 'CONTROL_TRUST_REGION':
             print('constructing control trust region cost ..')
             self._cost_related_optimizers = model._optimizers_objects['control_slack']     
             self.__construct_control_trust_region_cost()
 
+    """
+    quadratic cost
+    """
     def __construct_total_cost(self, model):
         N = self.N
         running_state_cost, control_cost = model._state_cost_weights, model._control_cost_weights
@@ -40,12 +43,15 @@ class Cost:
                          sparse.kron(np.eye(N), control_cost), np.zeros((N+1, N+1)),
                                                    np.zeros((N, N))])
 
+    """
+    com regulation cost following a simple zig-zag
+    """
     def __construct_com_cost(self, model):
         optimizer_object = self._cost_related_optimizers
         com_tracking_traj = self.data.init_trajectories['state']
         for time_idx in range(self.N+1):
-            com_x_cost_idx = optimizer_object._x_idx_vector[time_idx]
-            self._gradient[com_x_cost_idx:com_x_cost_idx+3] = com_tracking_traj[:3, time_idx]
+            com_x_idx = optimizer_object._optimizer_idx_vector[time_idx]
+            self._gradient[com_x_idx:com_x_idx+3] = com_tracking_traj[:3, time_idx]
 
     """
     L1 norm penalty cost on the state trust region
@@ -72,7 +78,7 @@ if __name__=='__main__':
     # create model and data
     contact_trajectory = create_contact_trajectory(conf)         
     model = bipedal_centroidal_model(conf)
-    data = trajectory_data(model, contact_trajectory)
+    data = trajectory_data(model, conf.contact_sequence, contact_trajectory)
     QR_cost = Cost(model, data, contact_trajectory, 'STATE_CONTROL')
     trust_region_cost = Cost(model, data, contact_trajectory, 'TRUST_REGION')   
     hessian = QR_cost._hessian

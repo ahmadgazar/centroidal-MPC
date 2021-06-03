@@ -1,48 +1,86 @@
-from contact_plan import Debris
+from contact_plan import Contact, Debris
+from utils import compute_centroid
 import numpy as np
-
-# state and control dimensions
-# ----------------------------
-n_x = 9
-n_u = 12
-n_p = 6 
 
 # walking parameters:
 # -------------------
 dt = 0.1
 contact_duration  = 0.8 # time needed for every step
+mu = 0.1                # linear friction coefficient
 
-# linear friction coefficient
-mu = 0.001 
+# robot contacts
+# --------------
 
-# terrain parameters:
-# -------------------
-# Terrain is a list of stepstone. They are defined by the SE3 placement.
-# terrain = [     
-#         #      x --- y --- z---axis---angle
-#         Debris(0., .085, 0., [1, 0], 0., ACTIVE_CONTACT='LF'), 
-#         Debris(0.,-.085, 0., [0, 1], 0., ACTIVE_CONTACT='RF'),  
-#         Debris(.3, -.3, .3, [-1, 0], 0.5, ACTIVE_CONTACT='RF'),
-#         Debris(.3,  .3, .3, [1, 0], 0.5, ACTIVE_CONTACT='LF')]
+# talos feet 
+rf = Contact("RF", "flat")
+lf = Contact("LF", "flat")
+feet = [rf, lf]
 
-#                         x (m)  y(m) z(m)  axis  angle(rad)                      x (m)  y(m) z(m)  axis  angle(rad)  
-contact_sequence = [[Debris(0., .085, 0., [1, 0], 0., ACTIVE_CONTACT='LF') , Debris(0.,  -.085, 0., [0, 1], 0., ACTIVE_CONTACT='RF')],
-                    [Debris(0., .085, 0., [1, 0], 0., ACTIVE_CONTACT='LF') ,                                                  None],
-                    [Debris(0., .085, 0., [1, 0], 0., ACTIVE_CONTACT='LF') , Debris(.3, -.3, .3, [-1, 0], 0.5, ACTIVE_CONTACT='RF')],
-                    [None                                                  , Debris(.3, -.3, .3, [-1, 0], 0.5, ACTIVE_CONTACT='RF')],
-                    [Debris(.3, .3, .3, [1, 0], 0.5, ACTIVE_CONTACT='LF')  , Debris(.3, -.3, .3, [-1, 0], 0.5, ACTIVE_CONTACT='RF')]
-                    ] 
+# solo12 feet
+# fr = Contact("FR", "point")
+# fl = Contact("FL", "point")
+# hr = Contact("HR", "point")
+# hl = Contact("HL", "point")
+# feet = [fr, fl, hr, hl]
 
+# state and control dimensions
+# ----------------------------
+n_u_per_contact = 6
+n_u = len(feet)*n_u_per_contact
+n_x = 9
+n_p = 6 
+n_t = 1
+
+# contact_sequence 
+# ----------------
+
+# -----
+# talos
+# -----  
+
+contact_sequence = [[Debris(CONTACT='LF', x=0., y=.085, z=0., axis=[1, 0], angle=0., ACTIVE=True), Debris(CONTACT='RF',x=0.,y=-.085,z=0.,axis=[0, 1],angle=0., ACTIVE=True)],
+                    [Debris(CONTACT='LF', x=0., y=.085, z=0., axis=[1, 0], angle=0., ACTIVE=True), Debris(CONTACT='RF', ACTIVE=False)                                      ],
+                    [Debris(CONTACT='LF', x=0., y=.085, z=0., axis=[1, 0], angle=0., ACTIVE=True), Debris(CONTACT='RF',x=.2,y=-.2,z=.2,axis=[-1, 0],angle=0.3, ACTIVE=True)],
+                    [Debris(CONTACT='LF', ACTIVE=False)                                          , Debris(CONTACT='RF',x=.2,y=-.2,z=.2,axis=[-1, 0],angle=0.3, ACTIVE=True)],
+                    [Debris(CONTACT='LF', x=.2, y=.2, z=.2, axis=[1, 0], angle=0.3, ACTIVE=True) , Debris(CONTACT='RF',x=.2,y=-.2,z=.2,axis=[-1, 0],angle=0.3, ACTIVE=True)]] 
+
+# ------
+# solo12
+# ------ 
+
+# trot sequence
+# contact_sequence = [[Debris(CONTACT='FR', x=.42,  y=-.0275, z=0., axis=[0, 0], angle=0., ACTIVE=True), Debris(CONTACT='FL', x=0.42, y=.0275, z=0., axis=[0, 0],angle=0., ACTIVE=True),
+#                      Debris(CONTACT='HR', x=-.42, y=-.0275, z=0., axis=[0, 0], angle=0., ACTIVE=True), Debris(CONTACT='HL', x=-0.42, y=.0275, z=0., axis=[0, 0],angle=0., ACTIVE=True)],
+
+#                     [Debris(CONTACT='FR'                                               , ACTIVE=False), Debris(CONTACT='FL', x=0.42, y=.0275, z=0., axis=[0, 0],angle=0., ACTIVE=True),
+#                      Debris(CONTACT='HR', x=-.42, y=-.0275, z=0., axis=[0, 0], angle=0., ACTIVE=True), Debris(CONTACT='HL'                                              , ACTIVE=False)],
+                    
+#                     [Debris(CONTACT='FR', x=.52,  y=-.0275, z=0., axis=[0, 0], angle=0., ACTIVE=True), Debris(CONTACT='FL', x=0.42, y=.0275, z=0., axis=[0, 0],angle=0., ACTIVE=True),
+#                      Debris(CONTACT='HR', x=-.42, y=-.0275, z=0., axis=[0, 0], angle=0., ACTIVE=True), Debris(CONTACT='HL', x=-0.32, y=.0275, z=0., axis=[0, 0],angle=0., ACTIVE=True)],
+
+#                     [Debris(CONTACT='FR', x=.52,  y=-.0275, z=0., axis=[0, 0], angle=0., ACTIVE=True), Debris(CONTACT='FL'                                              , ACTIVE=False),
+#                      Debris(CONTACT='HR'                                                , ACTIVE=False), Debris(CONTACT='HL', x=-0.32, y=.0275, z=0., axis=[0, 0],angle=0., ACTIVE=True)],
+
+#                     [Debris(CONTACT='FR', x=.52,  y=-.0275, z=0., axis=[0, 0], angle=0., ACTIVE=True), Debris(CONTACT='FL', x=0.52, y=.0275, z=0., axis=[0, 0], angle=0., ACTIVE=True),
+#                      Debris(CONTACT='HR', x=-.32, y=-.0275, z=0., axis=[0, 0], angle=0., ACTIVE=True), Debris(CONTACT='HL', x=-0.32, y=.0275, z=0., axis=[0, 0],angle=0., ACTIVE=True)],
+
+#                     ] 
 nb_steps = len(contact_sequence)
 contact_knots = int(round(contact_duration/dt))
 N = nb_steps*contact_knots     
 
-# LQR gains 
+# LQR gains (for stochastic control)
+# ----------------------------------
 Q = np.zeros((n_x, n_x))
 R = 1*np.eye(n_u)
 
 # robot parameters:
 # -----------------
+
+# -----
+# Talos
+# -----
+
 robot_mass = 95.
 gravity_constant = -9.81 
 foot_scaling  = 1.
@@ -51,6 +89,17 @@ lxn = foot_scaling*0.05  # foot length in negative x direction
 lyp = foot_scaling*0.05  # foot length in positive y direction
 lyn = foot_scaling*0.05  # foot length in negative y direction
 
+# ------
+# Solo12
+# ------
+# robot_mass = 2.2
+# gravity_constant = -9.81 
+# foot_scaling  = 1.
+# lxp = foot_scaling*0.01  # foot length in positive x direction
+# lxn = foot_scaling*0.01  # foot length in negative x direction
+# lyp = foot_scaling*0.01  # foot length in positive y direction
+# lyn = foot_scaling*0.01  # foot length in negative y direction
+
 # noise parameters:
 # -----------------
 Cov_noise = 0.01*np.eye(n_x)
@@ -58,35 +107,34 @@ Cov_contact_positions = 0.01*np.eye(n_p)
 
 # intiial and final conditions:
 # -----------------------------
-com_z = 0.88
+com_z = 0.88  # talos
+#com_z = 0.24   # solo12
+
 x_init =  np.array([0., 0., com_z, 0., 0., 0., 0., 0., 0.])
-last_contact_rf = contact_sequence[-1][1]
-last_contact_lf = contact_sequence[-1][0]
-
-# LF active and RF not active
-if last_contact_lf and not last_contact_rf:
-        com_final =  np.array([last_contact_lf.pose.translation[0], 
-                               last_contact_lf.pose.translation[1], 
-                        com_z+last_contact_lf.pose.translation[2]])
-# RF active and LF not active
-elif last_contact_rf and not last_contact_lf:    
-        com_final = np.array([last_contact_rf.pose.translation[0], 
-                              last_contact_rf.pose.translation[1], 
-                        com_z+last_contact_rf.pose.translation[2]])                  
-# RF active and LF active                                                                                                  
-elif last_contact_rf and last_contact_lf:    
-        com_final = np.array([0.5*(last_contact_rf.pose.translation[0]+last_contact_lf.pose.translation[0]), 
-                              0.5*(last_contact_rf.pose.translation[1]+last_contact_lf.pose.translation[1]), 
-                     0.5*(last_contact_rf.pose.translation[2]+last_contact_lf.pose.translation[2]) + com_z])                                      
-x_final = np.array([com_final[0], com_final[1], com_final[2], 0., 0., 0., 0., 0., 0.])
-
+final_contact_sequence = contact_sequence[-1]
+vertices = np.array([]).reshape(0, 3)
+for contact in final_contact_sequence:
+    if contact.ACTIVE:
+        vertices = np.vstack([vertices, contact.pose.translation])
+centeroid = compute_centroid(vertices)
+x_final = np.array([centeroid[0], centeroid[1], com_z+centeroid[2], 
+                                           0., 0., 0., 0., 0., 0.])
 # cost objective weights:
 # -----------------------
-state_cost_weights = np.diag([1e2, 1e2, 1e2, 1e3, 1e4, 1e6, 1e6, 1e6, 1e6])
-control_cost_weights = np.diag([1e6, 1e6, 1e4, 1e4, 1e3, 1e3, 1e6, 1e6, 1e4, 1e4, 1e3, 1e3])
 
-# SCP parameters:
-# --------------- 
+# ------
+# talos 
+# ------
+state_cost_weights = np.diag([1e2, 1e2, 1e2, 1e6, 1e6, 1e7, 1e8, 1e8, 1e8])
+control_cost_weights = np.diag([1e6, 1e6, 1e5, 1e5, 1e3, 1e7, 1e6, 1e6, 1e5, 1e5, 1e3, 1e7])
+
+# ------
+# solo12 
+# ------
+# control_cost_weights = np.diag([1e6, 1e6, 1e5, 1e5, 1e3, 1e7, 1e6, 1e6, 1e5, 1e5, 1e3, 1e7,
+#                                 1e6, 1e6, 1e5, 1e5, 1e3, 1e7, 1e6, 1e6, 1e5, 1e5, 1e3, 1e7])
+# SCP solver parameters:
+# --------------------- 
 scp_params  = {"trust_region_radius0":  10,
               "omega0":                100,
            "omega_max":             1.0e10,

@@ -1,6 +1,6 @@
 from scp_solver import SCP
-from centroidal_model import bipedal_centroidal_model
-from trajectory_data import trajectory_data
+from centroidal_model import Centroidal_model
+from trajectory_data import Data
 from contact_plan import create_contact_trajectory 
 from cost import Cost
 from constraints import Constraints 
@@ -18,8 +18,8 @@ contact_sequence = conf.contact_sequence
 contact_trajectory = create_contact_trajectory(conf)      
 
 # create model and data
-model = bipedal_centroidal_model(conf)
-data = trajectory_data(model, contact_sequence, contact_trajectory)
+model = Centroidal_model(conf)
+data = Data(model, contact_sequence, contact_trajectory)
 
 # build cost
 com_cost = Cost(model, data, contact_trajectory, 'COM_REGULATION')
@@ -34,7 +34,7 @@ dynamics_constraints = Constraints(model, data, contact_trajectory, 'DYNAMICS')
 final_conditions = Constraints(model, data, contact_trajectory, 'FINAL_CONDITIONS')
 cop_constraints = Constraints(model, data, contact_trajectory, 'COP')
 friction_pyramid = Constraints(model, data, contact_trajectory, 'FRICTION_PYRAMID')
-#unilaterality_constraints = Constraints(model, data, contact_trajectory, 'UNILATERAL')
+unilaterality_constraints = Constraints(model, data, contact_trajectory, 'UNILATERAL')
 state_trust_region_constraints = Constraints(model, data, contact_trajectory, 'STATE_TRUST_REGION')
 #control_trust_region_constraints = Constraints(model, data, contact_trajectory, 'CONTROL_TRUST_REGION')
 
@@ -46,5 +46,5 @@ problem.solve_scp()
 
 # plot final solution
 utils.plot_state(problem)
-utils.plot_rf_controls(problem)
-utils.plot_lf_controls(problem)
+utils.plot_controls(problem)
+

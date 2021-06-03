@@ -1,5 +1,7 @@
-import numpy as np
 import matplotlib.pyplot as plt 
+import numpy as np
+import sympy as sp 
+
 # helper functions
 def normalize(v):
     assert(v.shape[0] == 3)
@@ -17,6 +19,19 @@ def construct_friction_pyramid_constraint_matrix(model):
         pyramid_constraint_matrix[i,:] = rotated_pyramid_vector 
     return pyramid_constraint_matrix
 
+def compute_centroid(vertices):
+    centroid = [0., 0., 0.]
+    n = len(vertices)
+    centroid[0] = np.sum(np.asarray(vertices)[:, 0])/n
+    centroid[1] = np.sum(np.asarray(vertices)[:, 1])/n
+    centroid[2] = np.sum(np.asarray(vertices)[:, 2])/n
+    return centroid
+
+
+def skew_sym(v): return sp.Matrix([[0      , -v[2,0], v[1,0]], 
+                                   [v[2,0] , 0      , -v[0,0]], 
+                                   [-v[1,0], v[0,0] , 0]])
+    
 def plot_state(self):
     X = self.all_solution['state'][0]
     plt.rc('text', usetex = True)
@@ -52,62 +67,36 @@ def plot_state(self):
     kz.set_title('ang. mom$_z$')
     plt.setp(kz, ylabel=r'\textbf(kg.m/s)')
     plt.xlabel(r'\textbf{time} (s)', fontsize=14)
-    fig.suptitle('state trajectories', fontsize=20)
-    #plt.show()
+    fig.suptitle('state trajectories')
 
-def plot_rf_controls(self):
-    U = self.all_solution['control'][0][0:int(self.n_u/2), :]
-    plt.rc('text', usetex = True)
-    plt.rc('font', family ='serif')
-    dt = self.model._dt
-    fig, (copx, copy, fx, fy, fz, tauz) = plt.subplots(6, 1, sharex=True)
-    time = np.arange(0, np.round((U.shape[1])*dt, 2),dt)
-    copx.plot(time, U[0,:])
-    copx.set_title('CoP$_x$')
-    plt.setp(copx, ylabel=r'\textbf(m)')
-    copy.plot(time, U[1,:])
-    copy.set_title('CoP$_y$')
-    plt.setp(copy, ylabel=r'\textbf(m)')
-    fx.plot(time, U[2,:], label=r'\textbf{z} (N)')
-    fx.set_title('F$_x$')
-    plt.setp(fx, ylabel=r'\textbf(N)')
-    fy.plot(time, U[3,:])
-    fy.set_title('F$_y$')
-    plt.setp(fy, ylabel=r'\textbf(N)')
-    fz.plot(time, U[4,:])
-    fz.set_title('F$_z$')
-    plt.setp(fz, ylabel=r'\textbf(N)')
-    tauz.plot(time, U[5,:])
-    tauz.set_title('M$_x$')
-    plt.setp(tauz, ylabel=r'\textbf(N.m)')
-    plt.xlabel(r'\textbf{time} (s)', fontsize=14)
-    fig.suptitle('control trajectories of the right foot', fontsize=20)
-
-def plot_lf_controls(self):
-    U = self.all_solution['control'][0][int(self.n_u/2):, :]
-    plt.rc('text', usetex = True)
-    plt.rc('font', family ='serif')
-    dt = self.model._dt
-    fig, (copx, copy, fx, fy, fz, tauz) = plt.subplots(6, 1, sharex=True)
-    time = np.arange(0, np.round((U.shape[1])*dt, 2),dt)
-    copx.plot(time, U[0,:])
-    copx.set_title('CoP$_x$')
-    plt.setp(copx, ylabel=r'\textbf(m)')
-    copy.plot(time, U[1,:])
-    copy.set_title('CoP$_y$')    
-    plt.setp(copy, ylabel=r'\textbf(m)')
-    fx.plot(time, U[2,:], label=r'\textbf{z} (N)')
-    fx.set_title('F$_x$')
-    plt.setp(fx, ylabel=r'\textbf(N)')
-    fy.plot(time, U[3,:])
-    fy.set_title('F$_y$')
-    plt.setp(fy, ylabel=r'\textbf(N)')
-    fz.plot(time, U[4,:])
-    fz.set_title('F$_z$')
-    plt.setp(fz, ylabel=r'\textbf(N)')
-    tauz.plot(time, U[5,:])
-    tauz.set_title('M$_x$')    
-    plt.setp(tauz, ylabel=r'\textbf(N.m)')
-    plt.xlabel(r'\textbf{time} (s)', fontsize=14)
-    fig.suptitle('control trajectories of the left foot', fontsize=20)
-    plt.show()
+def plot_controls(self):
+    contacts = self.model._contacts
+    for contact_idx, contact in enumerate (contacts):
+        cop_idx_0 = int(contact_idx*self.n_u/len(contacts))#self.model._control_optimizers_indices[contact_name]['cops'][0]._optimizer_idx_vector[0]
+        plt.rc('text', usetex = True)
+        plt.rc('font', family ='serif')
+        dt = self.model._dt
+        fig, (copx, copy, fx, fy, fz, tauz) = plt.subplots(6, 1, sharex=True) 
+        U = self.all_solution['control'][0][cop_idx_0:cop_idx_0+int(self.n_u/len(contacts))] 
+        time = np.arange(0, np.round((U.shape[1])*dt, 2),dt)
+        copx.plot(time, U[0,:])
+        copx.set_title('CoP$_x$')
+        plt.setp(copx, ylabel=r'\textbf(m)')
+        copy.plot(time, U[1,:])
+        copy.set_title('CoP$_y$')
+        plt.setp(copy, ylabel=r'\textbf(m)')
+        fx.plot(time, U[2,:], label=r'\textbf{z} (N)')
+        fx.set_title('F$_x$')
+        plt.setp(fx, ylabel=r'\textbf(N)')
+        fy.plot(time, U[3,:])
+        fy.set_title('F$_y$')
+        plt.setp(fy, ylabel=r'\textbf(N)')
+        fz.plot(time, U[4,:])
+        fz.set_title('F$_z$')
+        plt.setp(fz, ylabel=r'\textbf(N)')
+        tauz.plot(time, U[5,:])
+        tauz.set_title('M$_x$')
+        plt.setp(tauz, ylabel=r'\textbf(N.m)')
+        plt.xlabel(r'\textbf{time} (s)', fontsize=14)
+        fig.suptitle('control trajectories of '+contact._name)
+    plt.show()    
