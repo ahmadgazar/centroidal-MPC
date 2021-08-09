@@ -4,14 +4,14 @@ from trajectory_data import Data
 from contact_plan import create_contact_trajectory 
 from cost import Cost
 from constraints import Constraints 
-import conf 
+import conf_talos as conf 
 import numpy as np
 import sys
 import utils
 
+# terminal print settings
 np.set_printoptions(threshold=sys.maxsize)
 np.set_printoptions(linewidth=500)
-
 
 # create a contact sequence and contact trajectory 
 contact_sequence = conf.contact_sequence
@@ -22,7 +22,7 @@ model = Centroidal_model(conf)
 data = Data(model, contact_sequence, contact_trajectory)
 
 # build cost
-com_cost = Cost(model, data, contact_trajectory, 'COM_REGULATION')
+com_regulation_cost = Cost(model, data, contact_trajectory, 'COM_REGULATION')
 state_trust_region_cost = Cost(model, data, contact_trajectory, 'STATE_TRUST_REGION')
 #control_trust_region_cost = Cost(model, data, contact_trajectory, 'CONTROL_TRUST_REGION')
 state_control_cost = Cost(model, data, contact_trajectory, 'STATE_CONTROL')
