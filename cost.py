@@ -69,16 +69,16 @@ class Cost:
                                                 np.ones(self._nb_slack_optimizers)
 
 if __name__=='__main__':
-    import conf
-    from centroidal_model import bipedal_centroidal_model
-    from trajectory_data import trajectory_data
+    import conf_talos as conf
+    from centroidal_model import Centroidal_model
+    from trajectory_data import Data
     from contact_plan import create_contact_trajectory 
     import numpy as np
     import matplotlib.pyplot as plt
     # create model and data
     contact_trajectory = create_contact_trajectory(conf)         
-    model = bipedal_centroidal_model(conf)
-    data = trajectory_data(model, conf.contact_sequence, contact_trajectory)
+    model = Centroidal_model(conf)
+    data = Data(model, conf.contact_sequence, contact_trajectory)
     QR_cost = Cost(model, data, contact_trajectory, 'STATE_CONTROL')
     trust_region_cost = Cost(model, data, contact_trajectory, 'TRUST_REGION')   
     hessian = QR_cost._hessian
@@ -89,7 +89,7 @@ if __name__=='__main__':
                  x[...] = 1 
     plt.figure()
     plt.grid()
-    plt.suptitle('Structure of Hessian of COP')
+    plt.suptitle('Structure of Hessian')
     plt.imshow(hessian, cmap='Greys', extent =[0, hessian.shape[1],
                 hessian.shape[0],0], interpolation = 'nearest') 
     plt.show()                               

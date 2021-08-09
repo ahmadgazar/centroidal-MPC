@@ -2,21 +2,33 @@ import matplotlib.pyplot as plt
 import numpy as np
 import sympy as sp 
 
-# helper functions
+# Discrete Algebraic Ricatti Equation
+def compute_DARE(A, B, Q, R, P):
+    AtP           = A.T @ P
+    AtPA          = AtP @ A
+    AtPB          = AtP @ B
+    RplusBtPB_inv = np.linalg.inv(R + B.T @ P @ B)
+    P_minus       = (Q + AtPA) - (AtPB @ RplusBtPB_inv @ (AtPB.T))
+    return P_minus
+
+def compute_lqr_feedback_gains(A, B, Q, R, niter=5):
+    P = Q
+    for i in range(niter):
+        P = compute_DARE(A, B, Q, R, P)
+        K = -np.linalg.inv(R + B.T @ P @ B) @ (B.T @ P @ A)
+    return K
+
 def normalize(v):
     assert(v.shape[0] == 3)
     return v/np.linalg.norm(v)
 
 def construct_friction_pyramid_constraint_matrix(model):
-    pyramid_constraint_matrix = np.zeros((4,3))
-    angle  = 2*(np.pi/4)
-    pyramid_constraints_vector = normalize(np.array([0.5*np.sqrt(2), 0.5*np.sqrt(2), -model._linear_friction_coefficient]))
-    pyramid_rotation_matrix = np.array([[np.cos(angle), -np.sin(angle), 0.],
-                                        [np.sin(angle), np.cos(angle) , 0.],
-                                        [0.               , 0.        , 1.]])
-    rotated_pyramid_vector = pyramid_rotation_matrix @ pyramid_constraints_vector
-    for i in range(4):
-        pyramid_constraint_matrix[i,:] = rotated_pyramid_vector 
+    mu_linear = 0.5*np.sqrt(2)
+    pyramid_constraint_matrix = np.array([[1. ,  0., -mu_linear], 
+                                    [-1.,  0., -mu_linear],                                     
+                                    [0. ,  1., -mu_linear], 
+                                    [0. , -1., -mu_linear], 
+                                    [0. ,  0., -1.]])
     return pyramid_constraint_matrix
 
 def compute_centroid(vertices):

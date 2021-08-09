@@ -53,7 +53,7 @@ class Constraints:
         elif self._CONSTRAINT_IDENTIFIER == 'FRICTION_PYRAMID':
             # pre-allocate memory
             self._constraint_related_optimizers = model._control_optimizers_indices
-            self.construct_friction_pyramid_constraints(model)
+            self.construct_friction_pyramid_constraints(model, data)
                                              
         elif self._CONSTRAINT_IDENTIFIER == 'CONTROL_TRUST_REGION':
             self._constraint_related_optimizers = model._control_slack_optimizers_indices
@@ -169,22 +169,29 @@ class Constraints:
     """
     inner-linear approximation of friction cone constraints 
     """
-    def construct_friction_pyramid_constraints(self, model): 
+    def construct_friction_pyramid_constraints(self, model, data):
+        nx, nu = model._n_x, model._n_u 
         friction_pyramid_mat = construct_friction_pyramid_constraint_matrix(model)
         contact_trajectory = self.contact_trajectory
         Aineq_total = np.array([]).reshape(0, self.n_all)
+        u0_indices = next(iter(self._constraint_related_optimizers.items()))[1]['cops'][0]._optimizer_idx_vector
         for contact in model._contacts:
             # pre-allocate memory
             Aineq = np.zeros((friction_pyramid_mat.shape[0]*self.N, self.n_all))
-            optimizer_objects = self._constraint_related_optimizers[contact._name]['forces']
+            force_optimizers = self._constraint_related_optimizers[contact._name]['forces']
             for time_idx in range(self.N):        
-                if contact_trajectory[contact._name][time_idx].ACTIVE:    
+                if contact_trajectory[contact._name][time_idx].ACTIVE:
+                    x_k, u_k = data.previous_trajectories['state'][:, time_idx], data.previous_trajectories['control'][:, time_idx]
+                    contact_logic_and_pose = data.contacts_logic_and_pose[time_idx]
+                    K = np.reshape(data.LQR_gains[:, time_idx], (nu, nx), order='F')
+                    Cov_k = np.reshape(data.Covs[:, time_idx], (nx, nx), order='F')    
                     contact_orientation = contact_trajectory[contact._name][time_idx].pose.rotation
                     rotated_friction_pyramid_mat = friction_pyramid_mat @ contact_orientation.T
                     for constraint_idx in range(rotated_friction_pyramid_mat.shape[0]):
-                        for x_y_z_idx, optimizer_object in enumerate(optimizer_objects):  
+                        idx = time_idx*rotated_friction_pyramid_mat.shape[0] + constraint_idx
+                        for x_y_z_idx, optimizer_object in enumerate(force_optimizers):  
                             optimizer_idx = optimizer_object._optimizer_idx_vector[time_idx]
-                            Aineq[time_idx, optimizer_idx] = rotated_friction_pyramid_mat[constraint_idx, x_y_z_idx]
+                            Aineq[idx, optimizer_idx] = rotated_friction_pyramid_mat[constraint_idx, x_y_z_idx]
             Aineq_total = np.vstack([Aineq_total, Aineq])
         self._constraints_matrix = Aineq_total
         self._lower_bound = -np.inf*np.ones(len(model._contacts)*rotated_friction_pyramid_mat.shape[0]*self.N) 
@@ -264,17 +271,17 @@ class Constraints:
                  
 
 if __name__=='__main__':
-    import conf
-    from centroidal_model import bipedal_centroidal_model
-    from trajectory_data import trajectory_data
+    import conf_talos as conf
+    from centroidal_model import Centroidal_model
+    from trajectory_data import Data
     from contact_plan import create_contact_trajectory 
     import numpy as np
     import matplotlib.pyplot as plt
     # create model and data
     contact_sequence = conf.contact_sequence
     contact_trajectory = create_contact_trajectory(conf)         
-    model = bipedal_centroidal_model(conf)
-    data = trajectory_data(model, contact_sequence, contact_trajectory)
+    model = Centroidal_model(conf)
+    data = Data(model, contact_sequence, contact_trajectory)
     cop_constraints = Constraints(model, data, contact_trajectory, 'COP')
     unilateral_constraints = Constraints(model, data, contact_trajectory, 'UNILATERAL')
     data.evaluate_dynamics_and_gradients(data.previous_trajectories['state'],
@@ -282,14 +289,16 @@ if __name__=='__main__':
     initial_constraints = Constraints(model, data, contact_trajectory, 'INITIAL_CONDITIONS')
     final_constraints = Constraints(model, data, contact_trajectory, 'FINAL_CONDITIONS')
     dynamics_constraints = Constraints(model, data, contact_trajectory, 'DYNAMICS')
-    trust_region_constraints = Constraints(model, data, contact_trajectory, 'CONTROL_TRUST_REGION')
+    friction_constraints = Constraints(model, data, contact_trajectory,  'FRICTION_PYRAMID')
+    #trust_region_constraints = Constraints(model, data, contact_trajectory, 'CONTROL_TRUST_REGION')
     A_ineq_initial_conditions = initial_constraints._constraints_matrix
     A_ineq_dynamics = dynamics_constraints._constraints_matrix
     A_ineq_final_conditions = final_constraints._constraints_matrix
     A_ineq_all_dynamics = np.vstack([A_ineq_initial_conditions,  A_ineq_dynamics, A_ineq_final_conditions]) 
     A_ineq_cop = cop_constraints._constraints_matrix
     A_ineq_unilateral = unilateral_constraints._constraints_matrix
-    A_ineq_trust_region = trust_region_constraints._constraints_matrix 
+    A_ineq_friction_pyramid = friction_constraints._constraints_matrix
+    #A_ineq_trust_region = trust_region_constraints._constraints_matrix 
  
     with np.nditer(A_ineq_cop, op_flags=['readwrite']) as it:
          for x in it:
@@ -311,10 +320,10 @@ if __name__=='__main__':
         for x in it:
             if x[...] != 0:
                 x[...] = 1
-    # with np.nditer(A_ineq_trust_region, op_flags=['readwrite']) as it:
-    #     for x in it:
-    #         if x[...] != 0:
-    #             x[...] = 1            
+    with np.nditer(A_ineq_friction_pyramid, op_flags=['readwrite']) as it:
+         for x in it:
+             if x[...] != 0:
+                 x[...] = 1            
     with np.nditer(A_ineq_all_dynamics, op_flags=['readwrite']) as it:
          for x in it:
              if x[...] != 0:
@@ -349,11 +358,11 @@ if __name__=='__main__':
     plt.imshow(A_ineq_unilateral, cmap='Greys', extent =[0,A_ineq_unilateral.shape[1],
                 A_ineq_unilateral.shape[0],0], interpolation = 'nearest')            
     
-    # plt.figure()
-    # plt.grid()
-    # plt.suptitle('Structure of A_ineq matrix of trust region')
-    # plt.imshow(A_ineq_trust_region, cmap='Greys', extent =[0,A_ineq_trust_region.shape[1],
-    #             A_ineq_trust_region.shape[0],0], interpolation = 'nearest')   
+    plt.figure()
+    plt.grid()
+    plt.suptitle('Structure of A_ineq matrix of friction pyramid')
+    plt.imshow(A_ineq_friction_pyramid, cmap='Greys', extent =[0,A_ineq_friction_pyramid.shape[1],
+                 A_ineq_friction_pyramid.shape[0],0], interpolation = 'nearest')   
     plt.figure()
     plt.grid()
     plt.suptitle('Structure of A_ineq matrix of all dynamics constraints')

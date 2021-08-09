@@ -62,7 +62,7 @@ class SCP:
                 constraint_object.construct_unilaterality_constraints(self.model)
             elif constraint_object._CONSTRAINT_IDENTIFIER == 'FRICTION_PYRAMID':
                 print('adding friction pyramid constraints ...')    
-                constraint_object.construct_friction_pyramid_constraints(self.model)
+                constraint_object.construct_friction_pyramid_constraints(self.model, self.data)
             elif constraint_object._CONSTRAINT_IDENTIFIER == 'CONTROL_TRUST_REGION':
                 print('adding control trust region constraints ...')
                 delta, omega = self.trust_region_updates['radius'], self.trust_region_updates['weight'] 
