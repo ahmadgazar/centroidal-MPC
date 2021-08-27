@@ -109,15 +109,15 @@ class SCP:
         contact_trajectory = self.data.contact_trajectory
         f_traj_prev = np.copy(data.dynamics)
         A_traj_prev, B_traj_prev = np.copy(data.gradients['f_x']), np.copy(data.gradients['f_u'])
-        non_linear_model_traj = model.evaluate_dynamics(X_prev, U_prev, contact_trajectory) 
+        non_linear_model_traj = model.evaluate_dynamics(X_curr, U_curr, contact_trajectory) 
         for time_idx in range(self.N): 
             delta_x = X_curr[:, time_idx] - X_prev[:,time_idx]
             delta_u = U_curr[:,time_idx]  - U_prev[:,time_idx] 
             A_k_prev = np.reshape(A_traj_prev[:, time_idx], (self.n_x, self.n_x), order='F')
             B_k_prev = np.reshape(B_traj_prev[:, time_idx], (self.n_x, self.n_u), order='F')
-            linear_model = f_traj_prev[:, time_idx] + A_k_prev @ delta_x + B_k_prev @ delta_u 
-            linear_model[:6] = non_linear_model_traj[:6, time_idx] # CoM and linear momentum dynamics are exact
-            model_error = non_linear_model_traj[:, time_idx] - linear_model 
+            linear_model = f_traj_prev[:, time_idx] + A_k_prev @ delta_x #+ B_k_prev @ delta_u 
+            #linear_model[:6] = non_linear_model_traj[:6, time_idx] # CoM and linear momentum dynamics are exact
+            model_error = non_linear_model_traj[:, time_idx] - linear_model
             num += model_error.T @ model_error
             den += linear_model.T @ linear_model 
         return num/den
@@ -152,7 +152,7 @@ class SCP:
             data.evaluate_dynamics_and_gradients(X, U)
             self.__update_all_constraints()
             QP_SOLVED = self.__solve_subproblem()
-            X_sol, U_sol = self.__get_QP_solution()
+            X_sol, U_sol = self.__get_QP_solution() 
             # break out when QP fails 
             if QP_SOLVED == False:
                 print('QP subproblem Failed at iter #' + str(scp_iteration ))
