@@ -35,32 +35,44 @@ class State_optimizer():
             self._optimizer_idx_vector[time_idx] = time_idx*self.nx + self._optimizer_idx
 
 class Control_optimizer():
-    def __init__(self, OPTIMIZER_IDENTIFIER, contact_idx, nb_x_optimizers, nb_u_ptimizers, horizon_length):
+    def __init__(self, OPTIMIZER_IDENTIFIER, contact_idx, robot_name, nb_x_optimizers, nb_u_ptimizers, horizon_length):
         self._name = OPTIMIZER_IDENTIFIER 
         self.nx = nb_x_optimizers
         self.nu = nb_u_ptimizers 
         self.N = horizon_length  
         self._optimizer_idx = None 
         self._optimizer_idx_vector = np.zeros(self.N, dtype=int)
-        self.__fill_optimizer_params(contact_idx)
+        self.__fill_optimizer_params(contact_idx, robot_name)
     
-    def __fill_optimizer_params(self, contact_idx):
-        if self._name == 'cop_x':
-            self._optimizer_idx = 0
-        elif self._name == 'cop_y':
-            self._optimizer_idx = 1
-        elif self._name == 'fx':
-             self._optimizer_idx = 2
-        elif self._name == 'fy':
-            self._optimizer_idx = 3
-        elif self._name == 'fz':
-            self._optimizer_idx = 4    
-        elif self._name == 'tau_z':
-            self._optimizer_idx = 5
-        else: print('this is not a control optimizer name !')
-        for time_idx in range(self.N):     
-            self._optimizer_idx_vector[time_idx] = self.nx*(self.N+1) + \
-                 time_idx*self.nu + (6*contact_idx) + self._optimizer_idx 
+    def __fill_optimizer_params(self, contact_idx, robot_name):
+        if robot_name == 'TALOS':
+            if self._name == 'cop_x':
+                self._optimizer_idx = 0
+            elif self._name == 'cop_y':
+                self._optimizer_idx = 1
+            elif self._name == 'fx':
+                self._optimizer_idx = 2
+            elif self._name == 'fy':
+                self._optimizer_idx = 3
+            elif self._name == 'fz':
+                self._optimizer_idx = 4    
+            elif self._name == 'tau_z':
+                self._optimizer_idx = 5
+            else: print('this is not a control optimizer name !')
+            for time_idx in range(self.N):     
+                self._optimizer_idx_vector[time_idx] = self.nx*(self.N+1) + \
+                    time_idx*self.nu + (6*contact_idx) + self._optimizer_idx            
+        elif robot_name == 'solo12':
+            if self._name == 'fx':
+                self._optimizer_idx = 0
+            elif self._name == 'fy':
+                self._optimizer_idx = 1
+            elif self._name == 'fz':
+                self._optimizer_idx = 2    
+            else: print('this is not a control optimizer name !')
+            for time_idx in range(self.N):     
+                self._optimizer_idx_vector[time_idx] = self.nx*(self.N+1) + time_idx*self.nu + (3*contact_idx) + self._optimizer_idx 
+            
 
 class Dynamics_optimizer():
     def __init__(self, OPTIMIZER_IDENTIFIER, nx_optimizers, nu_optimizers, horizon_length):

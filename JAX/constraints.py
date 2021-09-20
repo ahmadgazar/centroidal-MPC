@@ -18,7 +18,11 @@ def construct_initial_constraints(model):
 def construct_dynamics_constraints(model, prev_traj_tuple, traj_data):
     nx, N = model._n_x, model._N
     state_constraint_related_optimizers = model._state_optimizers_indices['coms'][0]
-    control_constraint_related_optimizers = model._control_optimizers_indices[next(iter(model._control_optimizers_indices))]['cops'][0]
+    if model._robot == 'TALOS':
+        control_constraint_related_optimizers = model._control_optimizers_indices[next(iter(model._control_optimizers_indices))]['cops'][0]
+    elif model._robot == 'solo12':
+        control_constraint_related_optimizers = model._control_optimizers_indices[next(iter(model._control_optimizers_indices))]['forces'][0]
+
     # pre-allocate memory
     constraint_dict= dict(mat=jnp.zeros((nx*N, model._total_nb_optimizers)), lb =jnp.zeros(nx*N), ub=jnp.zeros(nx*N))
     X, U = prev_traj_tuple['state'], prev_traj_tuple['control']
@@ -65,7 +69,7 @@ def construct_cop_constraints(model):
     Aineq_total = np.array([]).reshape(0, n_all)
     l_total = np.array([])
     u_total = np.array([])
-    for contact in model._contacts:
+    for contact in model._contact_trajectory:
         # pre-allocate memory for every contact
         Aineq_x = np.zeros((N, n_all))
         Aineq_y = np.zeros((N, n_all))
@@ -102,8 +106,9 @@ def construct_friction_pyramid_constraints(model):
     contact_trajectory = model._contact_trajectory
     friction_pyramid_mat = construct_friction_pyramid_constraint_matrix(model)
     Aineq_total = np.array([]).reshape(0, n_all)
-    u0_indices = next(iter(model._control_optimizers_indices.items()))[1]['cops'][0]._optimizer_idx_vector
-    for contact in model._contacts:
+    # u0_indices = next(iter(model._control_optimizers_indices.items()))[1]['cops'][0]._optimizer_idx_vector 
+    nb_contacts = len(model._contact_trajectory)
+    for contact in model._contact_trajectory:
         # pre-allocate memory
         Aineq = np.zeros((friction_pyramid_mat.shape[0]*N, n_all))
         force_optimizers = model._control_optimizers_indices[contact]['forces']
@@ -117,8 +122,8 @@ def construct_friction_pyramid_constraints(model):
                         optimizer_idx = optimizer_object._optimizer_idx_vector[time_idx]
                         Aineq[idx, optimizer_idx] = rotated_friction_pyramid_mat[constraint_idx, x_y_z_idx]
         Aineq_total = np.vstack([Aineq_total, Aineq])
-    return Constraint(mat=Aineq_total, lb=-np.inf*np.ones(len(model._contacts)*rotated_friction_pyramid_mat.shape[0]*N),
-                                                      ub=np.zeros(len(model._contacts)*friction_pyramid_mat.shape[0]*N))
+    return Constraint(mat=Aineq_total, lb=-np.inf*np.ones(nb_contacts*rotated_friction_pyramid_mat.shape[0]*N),
+                                                    ub=np.zeros(nb_contacts*friction_pyramid_mat.shape[0]*N))
 
 """
 control trust region constraints based on l1-norm exact penalty method

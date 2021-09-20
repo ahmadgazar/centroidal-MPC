@@ -4,7 +4,7 @@ from jax.tree_util import register_pytree_node_class
 from contact_plan import create_contact_trajectory 
 from utils import compute_centroid
 from functools import partial 
-import conf_solo12 as conf 
+from warnings import warn
 import jax.numpy as jnp 
 import numpy as np
 import jax
@@ -15,7 +15,7 @@ class Centroidal_model:
     # constructor
     def __init__(self, conf):
         # protected members
-        self._contacts = conf.feet 
+        self._robot = conf.robot 
         self._n_x = conf.n_x  #x = [com_x, com_y, com_z, lin_mom_x, lin_mom_y, lin_mom_z, ang_mom_x, ang_mom_y, ang_mom_z]
         self._n_u_per_contact = conf.n_u_per_contact
         self._n_u = conf.n_u  #u = [cop_x, cop_y, fx, fy, fz, tau_z]
@@ -39,39 +39,35 @@ class Centroidal_model:
                                   'y':np.array([conf.lyp, conf.lyn])}
         self._Cov_w = conf.cov_w  
         self._Cov_eta = conf.cov_white_noise                                                           
-        # private members
-        self.__x = ['com_x', 'com_y', 'com_z', 'lin_mom_x', 'lin_mom_y', 'lin_mom_z', 'ang_mom_x', 'ang_mom_y', 'ang_mom_z']
-        self.__u = ['cop_x', 'cop_y', 'fx', 'fy', 'fz', 'tau_z']       
         # private methods
-        self.__fill_optimizer_indices()
         self.__fill_contact_data(conf)
+        self.__fill_optimizer_indices()
         self.__fill_initial_trajectory()
    
     """Returns an iterable over container contents, and aux data."""
-    def tree_flatten(model):
-        flat_contents = (model._contacts,
-                        model._n_x,
-                        model._n_u,
-                        model._n_u_per_contact, 
-                        model._n_u, 
-                        model._n_w,    
-                        model._n_t, 
-                        model._N,   
-                        model._total_nb_optimizers, 
-                        model._x_init,  
-                        model._x_final,  
-                        model._com_z,  
-                        model._m, 
-                        model._g, 
-                        model._dt,
-                        model._state_cost_weights, 
-                        model._control_cost_weights,     
-                        model._linear_friction_coefficient, 
-                        model._Q, 
-                        model._R, 
-                        model._robot_foot_range, 
-                        model._Cov_w,   
-                        model._Cov_eta) 
+    def tree_flatten(self):
+        flat_contents = (self._n_x,
+                        self._n_u,
+                        self._n_u_per_contact, 
+                        self._n_u, 
+                        self._n_w,    
+                        self._n_t, 
+                        self._N,   
+                        self._total_nb_optimizers, 
+                        self._x_init,  
+                        self._x_final,  
+                        self._com_z,  
+                        self._m, 
+                        self._g, 
+                        self._dt,
+                        self._state_cost_weights, 
+                        self._control_cost_weights,     
+                        self._linear_friction_coefficient, 
+                        self._Q, 
+                        self._R, 
+                        self._robot_foot_range, 
+                        self._Cov_w,   
+                        self._Cov_eta) 
         return (flat_contents, None)
 
     @classmethod
@@ -83,21 +79,31 @@ class Centroidal_model:
         self._control_optimizers_indices = {}
         self._state_optimizers_indices = {}
         state_optimizers = []
+        x = ['com_x', 'com_y', 'com_z', 'lin_mom_x', 'lin_mom_y', 'lin_mom_z', 'ang_mom_x', 'ang_mom_y', 'ang_mom_z']
         # state optimizer indices
-        for state in self.__x:
+        for state in x:
             state_optimizers.append(State_optimizer(state, self._n_x, self._N))
         self._state_optimizers_indices['coms'] = state_optimizers[:2] 
         self._state_optimizers_indices['lin_moms'] = state_optimizers[2:5]
-        self._state_optimizers_indices['ang_moms'] = state_optimizers[-1]
+        self._state_optimizers_indices['ang_moms'] = state_optimizers[5::]
         # control optimizers indices for all contacts
-        for contact_idx, contact in enumerate(self._contacts):
+        if self._robot == 'solo12':
+            u = ['fx', 'fy', 'fz']
+        elif self._robot == 'TALOS':
+            u = ['cop_x', 'cop_y', 'fx', 'fy', 'fz', 'tau_z']       
+        else:
+            warn('only TALOS and solo12 robots are supported now!')    
+        for contact_idx, contact in enumerate(self._contact_trajectory):
             contact_optimizers_indices = {}
             control_optimizers = [] 
-            for control in self.__u:
-                control_optimizers.append(Control_optimizer(control, contact_idx, self._n_x, self._n_u, self._N))
-            contact_optimizers_indices['cops'] = control_optimizers[:2] 
-            contact_optimizers_indices['forces'] = control_optimizers[2:5]
-            contact_optimizers_indices['moment'] = control_optimizers[-1]
+            for control in u:
+                control_optimizers.append(Control_optimizer(control, contact_idx, self._robot, self._n_x, self._n_u, self._N))
+            if self._robot == 'TALOS':
+                contact_optimizers_indices['cops'] = control_optimizers[:2] 
+                contact_optimizers_indices['forces'] = control_optimizers[2:5]
+                contact_optimizers_indices['moment'] = control_optimizers[5::]
+            elif self._robot == 'solo12':
+                contact_optimizers_indices['forces'] = control_optimizers   
             # copy the dictionary of indices of every contact controls
             self._control_optimizers_indices[contact] = contact_optimizers_indices.copy() 
         # state slack indices
@@ -129,7 +135,7 @@ class Centroidal_model:
                 contacts_position_k.append(p)
             contacts_logic.append(contacts_logic_k)
             contacts_orientation.append(contacts_orientation_k)
-            contacts_position.append(jnp.array(contacts_position_k).reshape(len(self._contacts)*3))
+            contacts_position.append(jnp.array(contacts_position_k).reshape(len(contact_trajectory)*3))
         contacts_logic = jnp.array(contacts_logic)
         contacts_orientation = jnp.array(contacts_orientation)
         contacts_position = jnp.array(contacts_position)
@@ -156,22 +162,26 @@ class Centroidal_model:
     def integrate_model_one_step(self, x, u, contacts_position_all, contacts_logic_all, contacts_orientation_all):
         m = self._m
         f_init = jnp.array([(1./m)*x[3], (1./m)*x[4], (1./m)*x[5], 0., 0., m*self._g, 0., 0., 0.])
-        u_split = jnp.array(jnp.array_split(u, len(self._contacts)))
-        p_split = jnp.array(jnp.array_split(contacts_position_all, len(self._contacts)))
+        u_split = jnp.array(jnp.array_split(u, len(self._contact_trajectory)))
+        p_split = jnp.array(jnp.array_split(contacts_position_all, len(self._contact_trajectory)))
         @jax.jit   
         def dynamics_loop_body(contact_idx, curr):
-            u_per_contact  = u_split[contact_idx]
+            u_per_contact  = u_split[contact_idx] 
             R_per_contact = contacts_orientation_all[contact_idx, :,:]
             CONTACT_ACTIVATION = contacts_logic_all[contact_idx] 
             p_com = p_split[contact_idx] - x[0:3]
-            lin_mom_per_contact = CONTACT_ACTIVATION*jnp.array([u_per_contact[2], u_per_contact[3], u_per_contact[4]])
-            ang_mom_per_contact = CONTACT_ACTIVATION*(jnp.cross(p_com, u_per_contact[2:5]) + \
-                  jnp.cross((R_per_contact[:,0:2]@u_per_contact[0:2]), u_per_contact[2:5]) + \
-                                                         R_per_contact[:,2]*u_per_contact[5])
+            if self._robot == 'solo12':
+                lin_mom_per_contact = CONTACT_ACTIVATION*jnp.array([u_per_contact[0], u_per_contact[1], u_per_contact[2]])
+                ang_mom_per_contact = CONTACT_ACTIVATION*(jnp.cross(p_com, u_per_contact)) 
+            elif self._robot == 'TALOS':
+                lin_mom_per_contact = CONTACT_ACTIVATION*jnp.array([u_per_contact[2], u_per_contact[3], u_per_contact[4]])
+                ang_mom_per_contact = CONTACT_ACTIVATION*(jnp.cross(p_com, u_per_contact[2:5]) + \
+                      jnp.cross((R_per_contact[:,0:2]@u_per_contact[0:2]), u_per_contact[2:5]) + \
+                                                            R_per_contact[:,2]*u_per_contact[5])
             curr = jax.ops.index_update(curr, jax.ops.index[3:6], curr[3:6]+lin_mom_per_contact) 
             curr = jax.ops.index_update(curr, jax.ops.index[6:],  curr[6:]+ang_mom_per_contact) 
             return curr 
-        return x + jax.lax.fori_loop(0, len(self._contacts), dynamics_loop_body, f_init)*self._dt     
+        return x + jax.lax.fori_loop(0, len(self._contact_trajectory), dynamics_loop_body, f_init)*self._dt     
     
     @partial(jax.jit, static_argnums=(0,)) 
     def compute_everything(self, x, u, contacts_position_all, contacts_logic_all, contacts_orientation_all, Sigma_curr):
@@ -222,7 +232,7 @@ class Centroidal_model:
                         LQR_gains=jnp.zeros((N, nu, nx)),
                         gradients={'f_x':jnp.zeros((N, nx, nx)), 
                                    'f_u':jnp.zeros((N, nx, nu)), 
-                                   'f_w':jnp.zeros((N, nx, int(nu/2)))},
+                                   'f_w':jnp.zeros((N, nx, self._n_w))},
                              Covs=jnp.zeros((N+1, nx, nx)),
                    Covs_gradients={'Cov_dx':jnp.zeros((N+1, nx, nx, nx)),
                                    'Cov_du':jnp.zeros((N+1, nx, nx, nu))})
@@ -238,7 +248,7 @@ class Centroidal_model:
             traj_data['Covs_gradients']['Cov_dx'] = jax.ops.index_update(traj_data['Covs_gradients']['Cov_dx'], jax.ops.index[time_idx+1,:,:,:], dSigma_dx)
             traj_data['Covs_gradients']['Cov_du'] = jax.ops.index_update(traj_data['Covs_gradients']['Cov_du'], jax.ops.index[time_idx+1,:,:,:], dSigma_du)
             return traj_data 
-        return jax.lax.fori_loop(0, conf.N, loop_body, traj_data)      
+        return jax.lax.fori_loop(0, self._N, loop_body, traj_data)      
 
     def sample_pseudorandom_uncertainties(self):
         key = jax.random.PRNGKey(42) #initial seed 

@@ -1,24 +1,10 @@
 import numpy as np
-import sympy as sp
 import pinocchio as pin
-from numpy.linalg import norm
 import jax.numpy as jnp 
 from collections import namedtuple
 
-class Contact:
-    def __init__(self, NAME, TYPE):
-       self._type = TYPE
-       self._name = NAME
-       self._active = sp.symbols(NAME+'_ACTIVE')
-       self._u = sp.Matrix(['cop_x_'+NAME, 'cop_y_'+NAME, 'fx_'+NAME, 
-                                'fy_'+NAME, 'fz_'+NAME, 'tau_z_'+NAME])             
-       self._orientation = sp.MatrixSymbol('R_'+NAME,3,3) 
-       self._position = sp.MatrixSymbol('p_'+NAME,3,1)
-       self._optimizers_indices = {'cops':None, 'forces':None, 'moment':None}
-       self._idx = None     
-
 class Debris():
-    def __init__(self, CONTACT, x=None, y=None, z=None, axis=None, angle=None, ACTIVE=False):
+    def __init__(self, CONTACT, t_start=None, t_end=None, x=None, y=None, z=None, axis=None, angle=None, ACTIVE=False):
         """
         Minimal helper function: return the SE3 configuration of a stepstone, with some
         ad-hoc configuration.
@@ -26,10 +12,12 @@ class Debris():
         if ACTIVE:
             STEP = 1.0
             axis = np.array(axis, np.float64)
-            axis /= norm(axis)
+            axis /= np.linalg.norm(axis)
             self.axis = axis
             self.pose = pin.SE3(pin.AngleAxis(angle, np.concatenate([axis, [0]])).matrix(),
                             np.array([x * STEP, y * STEP, z]))
+        self.t_start = t_start 
+        self.t_end = t_end
         self.CONTACT = CONTACT
         self.ACTIVE = ACTIVE 
         self.__fill_contact_idx()
@@ -46,15 +34,23 @@ class Debris():
     
 # given a contact plan, fill a contact trajectory    
 def create_contact_trajectory(conf):
-    feet = conf.feet
-    contact_trajectory = dict([(foot, []) for foot in feet ])
-    for contacts in conf.contact_sequence:
+    contact_sequence = conf.contact_sequence
+    contact_trajectory = dict([(foot.CONTACT, []) for foot in  contact_sequence[0]]) 
+    for contacts in contact_sequence:
         for contact in contacts: 
             for time in range(conf.contact_knots):
-                for foot in feet:  
-                    if contact.CONTACT==foot: 
-                        contact_trajectory[foot].append(contact)
+                contact_trajectory[contact.CONTACT].append(contact)    
     return contact_trajectory                
+
+# def create_contact_trajectory(conf):
+#     contact_sequence = conf.contact_sequence
+#     contact_trajectory = dict([(foot.CONTACT, []) for foot in  contact_sequence[0]]) 
+#     for contacts in contact_sequence:
+#         for contact in contacts:
+#             contact_duration = (contact.t_end-contact.t_start)/conf.dt 
+#             for time in range(int(contact_duration)):
+#                 contact_trajectory[contact.CONTACT].append(contact)   
+#     return contact_trajectory                        
 
 def fill_debris_list(conf):
     Debri = namedtuple('Debris', 'LOGIC, R, p')  
@@ -86,13 +82,14 @@ if __name__=='__main__':
     import sys
     np.set_printoptions(threshold=sys.maxsize)
     #np.set_printoptions(linewidth=500)
-    import conf_talos as conf
+    import conf_solo12_fast_trot as conf
     contact_trajectory = create_contact_trajectory(conf)
-    contact_dic = fill_debris_list(conf)
-    print(contact_dic)
+    print(contact_trajectory)
+    # contact_dic = fill_debris_list(conf)
+    # print(contact_dic)
 
-    for time_idx in range(conf.N):
-        debris = []
-        for contact_idx, contact_name in enumerate(contact_trajectory): 
-            debris.append(contact_trajectory[contact_name][time_idx])
-        #print(debris)
+    # for time_idx in range(conf.N):
+    #     debris = []
+    #     for contact_idx, contact_name in enumerate(contact_trajectory): 
+    #         debris.append(contact_trajectory[contact_name][time_idx])
+    #     #print(debris)
