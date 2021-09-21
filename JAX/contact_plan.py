@@ -4,7 +4,7 @@ import jax.numpy as jnp
 from collections import namedtuple
 
 class Debris():
-    def __init__(self, CONTACT, t_start=None, t_end=None, x=None, y=None, z=None, axis=None, angle=None, ACTIVE=False):
+    def __init__(self, CONTACT, t_start=0.0, t_end=1.0, x=None, y=None, z=None, axis=None, angle=None, ACTIVE=False):
         """
         Minimal helper function: return the SE3 configuration of a stepstone, with some
         ad-hoc configuration.
@@ -35,23 +35,14 @@ class Debris():
 # given a contact plan, fill a contact trajectory    
 def create_contact_trajectory(conf):
     contact_sequence = conf.contact_sequence
-    contact_trajectory = dict([(foot.CONTACT, []) for foot in  contact_sequence[0]]) 
+    contact_trajectory = dict([(foot.CONTACT, []) for foot in  contact_sequence[0]])
     for contacts in contact_sequence:
-        for contact in contacts: 
-            for time in range(conf.contact_knots):
-                contact_trajectory[contact.CONTACT].append(contact)    
+        for contact in contacts:
+            contact_duration = (contact.t_end-contact.t_start)/conf.dt  
+            for time in range(int(contact_duration)):
+                contact_trajectory[contact.CONTACT].append(contact)                      
     return contact_trajectory                
-
-# def create_contact_trajectory(conf):
-#     contact_sequence = conf.contact_sequence
-#     contact_trajectory = dict([(foot.CONTACT, []) for foot in  contact_sequence[0]]) 
-#     for contacts in contact_sequence:
-#         for contact in contacts:
-#             contact_duration = (contact.t_end-contact.t_start)/conf.dt 
-#             for time in range(int(contact_duration)):
-#                 contact_trajectory[contact.CONTACT].append(contact)   
-#     return contact_trajectory                        
-
+                     
 def fill_debris_list(conf):
     Debri = namedtuple('Debris', 'LOGIC, R, p')  
     outer_tuple_list = []
@@ -78,18 +69,8 @@ def fill_debris_list(conf):
     return outer_tuple_list
 
 if __name__=='__main__':
-    # terminal print settings
     import sys
     np.set_printoptions(threshold=sys.maxsize)
-    #np.set_printoptions(linewidth=500)
     import conf_solo12_fast_trot as conf
     contact_trajectory = create_contact_trajectory(conf)
     print(contact_trajectory)
-    # contact_dic = fill_debris_list(conf)
-    # print(contact_dic)
-
-    # for time_idx in range(conf.N):
-    #     debris = []
-    #     for contact_idx, contact_name in enumerate(contact_trajectory): 
-    #         debris.append(contact_trajectory[contact_name][time_idx])
-    #     #print(debris)
