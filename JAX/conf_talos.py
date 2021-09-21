@@ -1,22 +1,19 @@
-from contact_plan import Contact, Debris
+from contact_plan import Debris
 from utils import compute_centroid
 import numpy as np
 
+robot = 'TALOS'
 # walking parameters:
 # -------------------
 dt = 0.1
 contact_duration  = 1.0 # time needed for every step
 mu = 0.1                # linear friction coefficient
 
-# robot contacts
-# --------------
-# talos feet 
-feet = ['RF', 'LF']
-
 # state and control dimensions
 # ----------------------------
+nb_contacts = 2
 n_u_per_contact = 6
-n_u = len(feet)*n_u_per_contact
+n_u = nb_contacts*n_u_per_contact
 n_x = 9
 n_t = 1
 
@@ -27,7 +24,6 @@ contact_sequence = [[Debris(CONTACT='LF', x=0., y=.085, z=0., axis=[1, 0], angle
                     [Debris(CONTACT='LF', x=0., y=.085, z=0., axis=[1, 0], angle=0., ACTIVE=True), Debris(CONTACT='RF',x=.2,y=-.2,z=.2,axis=[-1, 0],angle=0.6, ACTIVE=True)],
                     [Debris(CONTACT='LF', ACTIVE=False)                                          , Debris(CONTACT='RF',x=.2,y=-.2,z=.2,axis=[-1, 0],angle=0.6, ACTIVE=True)],
                     [Debris(CONTACT='LF', x=.2, y=.2, z=.2, axis=[1, 0], angle=0.6, ACTIVE=True) , Debris(CONTACT='RF',x=.2,y=-.2,z=.2,axis=[-1, 0],angle=0.6, ACTIVE=True)]] 
-
 
 nb_steps = len(contact_sequence)
 contact_knots = int(round(contact_duration/dt))
@@ -51,7 +47,7 @@ lyn = foot_scaling*0.05  # foot length in negative y direction
 # noise parameters:
 # -----------------
 FRICTION_UNCERTAINTY = 0.90
-n_w = len(feet)*3  # no. of contact position parameters
+n_w = nb_contacts*3  # no. of contact position parameters
 cov_w = 0.001*np.eye(n_w)
 cov_white_noise = 0.001*np.eye(n_x)
 
