@@ -38,9 +38,9 @@ def create_contact_trajectory(conf):
     contact_trajectory = dict([(foot.CONTACT, []) for foot in  contact_sequence[0]])
     for contacts in contact_sequence:
         for contact in contacts:
-            contact_duration = (contact.t_end-contact.t_start)/conf.dt  
-            for time in range(int(contact_duration)):
-                contact_trajectory[contact.CONTACT].append(contact)                      
+            contact_duration = int(round((contact.t_end-contact.t_start)/conf.dt))  
+            for time in range(contact_duration):
+                contact_trajectory[contact.CONTACT].append(contact)  
     return contact_trajectory                
                      
 def fill_debris_list(conf):

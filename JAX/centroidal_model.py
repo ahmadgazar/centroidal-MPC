@@ -16,17 +16,20 @@ class Centroidal_model:
     def __init__(self, conf):
         # protected members
         self._robot = conf.robot 
-        self._n_x = conf.n_x  #x = [com_x, com_y, com_z, lin_mom_x, lin_mom_y, lin_mom_z, ang_mom_x, ang_mom_y, ang_mom_z]
+        self._n_x = conf.n_x  
         self._n_u_per_contact = conf.n_u_per_contact
-        self._n_u = conf.n_u  #u = [cop_x, cop_y, fx, fy, fz, tau_z]
+        self._n_u = conf.n_u  
         self._n_w = conf.n_w   
         self._n_t = conf.n_t
         self._N = conf.N 
         self._total_nb_optimizers = self._n_x*(self._N+1) + self._n_u*self._N + \
                                     self._n_t*(self._N+1) + self._n_t*self._N
-        self._x_init = conf.x_init 
-        self._x_final = conf.x_final 
-        self._com_z = conf.com_z 
+        IK_to_Dyn = np.load('IK_to_dyn_centroidal_traj.npz')['X']                             
+        self._x_init = IK_to_Dyn[0]
+        self._x_final = IK_to_Dyn[-1]
+        # self._com_z = conf.com_z
+        # self._x_init = conf.x_init
+        # self._x_final = conf.x_final        
         self._m = conf.robot_mass        # total robot mass
         self._g = conf.gravity_constant  # gravity constant
         self._dt = conf.dt               # discretization time
@@ -34,9 +37,10 @@ class Centroidal_model:
         self._control_cost_weights = conf.control_cost_weights # control weight    
         self._linear_friction_coefficient = conf.mu
         self._Q = conf.Q
-        self._R = conf.R
-        self._robot_foot_range = {'x':np.array([conf.lxp, conf.lxn]),
-                                  'y':np.array([conf.lyp, conf.lyn])}
+        self._R = conf.R 
+        if self._robot == 'TALOS':
+            self._robot_foot_range = {'x':np.array([conf.lxp, conf.lxn]),
+                                      'y':np.array([conf.lyp, conf.lyn])}
         self._Cov_w = conf.cov_w  
         self._Cov_eta = conf.cov_white_noise                                                           
         # private methods
@@ -109,7 +113,7 @@ class Centroidal_model:
         # state slack indices
         self._state_slack_optimizers_indices = Slack_optimizer('state', self._n_x, self._n_u, self._n_t, self._N)
         # control slack indices 
-        #self._control_slack_optimizers_indices = Slack_optimizer('control', self._n_x, self._n_u, self._n_t, self._N) 
+        # self._control_slack_optimizers_indices = Slack_optimizer('control', self._n_x, self._n_u, self._n_t, self._N) 
     
     def __fill_contact_data(self, conf):
         contact_trajectory = create_contact_trajectory(conf) 
@@ -151,11 +155,12 @@ class Centroidal_model:
             for contact in contact_trajectory:
                 if contact_trajectory[contact][time_idx].ACTIVE:
                     vertices = jnp.vstack([vertices, contact_trajectory[contact][time_idx].pose.translation])
-            centeroid = compute_centroid(vertices)
-            init_trajectories['state'] = jax.ops.index_update(init_trajectories['state'], jax.ops.index[:, time_idx],\
-                            jnp.array([centeroid[0], centeroid[1], self._com_z+centeroid[2], 0., 0., 0., 0., 0., 0.]))
+            # centeroid = compute_centroid(vertices)
+            # init_trajectories['state'] = jax.ops.index_update(init_trajectories['state'], jax.ops.index[:, time_idx],\
+            #                 jnp.array([centeroid[0], centeroid[1], self._com_z+centeroid[2], 0., 0., 0., 0., 0., 0.]))
             init_trajectories['control'] = jax.ops.index_update(init_trajectories['control'], jax.ops.index[:, time_idx], 5e-6)
-        init_trajectories['state'] = jax.ops.index_update(init_trajectories['state'], jax.ops.index[:, -1], init_trajectories['state'][:, -2])
+        # init_trajectories['state'] = jax.ops.index_update(init_trajectories['state'], jax.ops.index[:, -1], init_trajectories['state'][:, -2])
+        init_trajectories['state'] = jnp.array(np.load('IK_to_dyn_centroidal_traj.npz')['X'].T)         
         self._init_trajectories = init_trajectories
 
     @partial(jax.jit, static_argnums=(0,)) 

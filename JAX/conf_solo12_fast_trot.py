@@ -5,8 +5,7 @@ import numpy as np
 # walking parameters:
 # -------------------
 dt = 0.05
-contact_duration  = 1.0 # time needed for every step
-mu = 0.1                # linear friction coefficient
+mu = 0.1 # linear friction coefficient
 
 # robot contacts
 # --------------
@@ -87,18 +86,6 @@ n_w = nb_contacts*3  # no. of contact position parameters
 cov_w = 0.01*np.eye(n_w)
 cov_white_noise = 0.001*np.eye(n_x)
 
-# intiial and final conditions:
-# -----------------------------
-com_z = 0.20   
-x_init =  np.array([0., 0., com_z, 0., 0., 0., 0., 0., 0.])
-final_contact_sequence = contact_sequence[-1]
-vertices = np.array([]).reshape(0, 3)
-for contact in final_contact_sequence:
-    if contact.ACTIVE:
-        vertices = np.vstack([vertices, contact.pose.translation])
-centeroid = compute_centroid(vertices)
-x_final = np.array([centeroid[0], centeroid[1], com_z+centeroid[2], 
-                                           0., 0., 0., 0., 0., 0.])
 # cost objective weights:
 # -----------------------
 state_cost_weights = np.diag([1e3, 1e7, 1e3, 1e6, 1e7, 1e6, 1e8, 1e8, 1e8])
