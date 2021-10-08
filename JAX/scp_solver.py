@@ -75,8 +75,8 @@ def compute_model_accuracy(model, curr_traj, prev_traj, prev_traj_data):
     def loop_body(time_idx, curr): 
         delta_x = X_curr[:, time_idx] - X_prev[:,time_idx]
         delta_u = U_curr[:,time_idx]  - U_prev[:,time_idx] 
-        linear_model = f_prev[:, time_idx] + A_prev[time_idx, :,:] @ delta_x #+ B_prev[time_idx, :,:] @ delta_u 
-        model_error = non_linear_model_traj[:, time_idx] - linear_model 
+        linear_model = f_prev[:, time_idx] + A_prev[time_idx, :,:] @ delta_x + B_prev[time_idx, :,:] @ delta_u 
+        model_error = non_linear_model_traj[6:, time_idx] - linear_model[6:] 
         curr['num'] += model_error.T @ model_error
         curr['den'] += linear_model.T @ linear_model
         return curr

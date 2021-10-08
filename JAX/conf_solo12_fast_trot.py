@@ -4,8 +4,11 @@ import numpy as np
 
 # walking parameters:
 # -------------------
+DYNAMICS_FIRST = True
 dt = 0.05
-mu = 0.1 # linear friction coefficient
+dt_ctrl = 0.001
+step_height = 0.05
+mu = 0.2 # linear friction coefficient
 
 # robot contacts
 # --------------
@@ -62,8 +65,23 @@ contact_sequence = [[Debris(CONTACT='FR', t_start=0.00, t_end=1.00, x=0.20,  y=-
                     [Debris(CONTACT='FR', t_start=4.00, t_end=4.50, x=1.30, y=-0.15, z=0.0, axis=[-1, 0], angle=0.0, ACTIVE=True), Debris(CONTACT='FL', t_start=4.00, t_end=4.50, x=1.30, y=0.15, z=0.0, axis=[1, 0],angle=0.0, ACTIVE=True),
                     Debris(CONTACT='HR', t_start=4.00, t_end=4.50, x=0.90, y=-0.15, z=0.0, axis=[-1, 0], angle=0.0, ACTIVE=True), Debris(CONTACT='HL', t_start=4.00, t_end=4.50, x=0.90, y=0.15, z=0.0, axis=[1, 0],angle=0.0, ACTIVE=True)]] 
 
-
-N = int(contact_sequence[-1][0].t_end/dt)    
+# intiial and final conditions:
+# -----------------------------
+if DYNAMICS_FIRST:
+      com_z = 0.25   
+      x_init =  np.array([0., 0., com_z, 0., 0., 0., 0., 0., 0.])
+      final_contact_sequence = contact_sequence[-1]
+      vertices = np.array([]).reshape(0, 3)
+      for contact in final_contact_sequence:
+            if contact.ACTIVE:
+                  vertices = np.vstack([vertices, contact.pose.translation])
+            centeroid = compute_centroid(vertices)
+            x_final = np.array([centeroid[0], centeroid[1], com_z+centeroid[2], 
+                                                      0., 0., 0., 0., 0., 0.])
+# planning and control horizon lengths:
+# -------------------------------------
+N = int(contact_sequence[-1][0].t_end/dt)
+N_ctrl = int(N*(dt/dt_ctrl))    
 
 # LQR gains (for stochastic control)
 # ----------------------------------
@@ -72,7 +90,11 @@ R = 1*np.eye(n_u)
 
 # robot parameters:
 # -----------------
-robot_mass = 2.2
+robot_mass = 2.5
+robot_inertia = np.array([[ 0.04196225, -0.00283098, -0.00321162],
+                          [-0.00283098,  0.0699186,  -0.00102368],
+                          [-0.00321162, -0.00102368,  0.08607027]])
+
 gravity_constant = -9.81 
 foot_scaling  = 1.
 lxp = foot_scaling*0.01  # foot length in positive x direction
@@ -88,7 +110,7 @@ cov_white_noise = 0.001*np.eye(n_x)
 
 # cost objective weights:
 # -----------------------
-state_cost_weights = np.diag([1e3, 1e7, 1e3, 1e6, 1e7, 1e6, 1e8, 1e8, 1e8])
+state_cost_weights = np.diag([1e3, 1e3, 1e3, 1e6, 1e6, 1e6, 1e8, 1e8, 1e8])
 control_cost_weights = np.diag([1e2, 1e2, 1e1, 
                                 1e2, 1e2, 1e1,
                                 1e2, 1e2, 1e1,

@@ -15,6 +15,7 @@ class Centroidal_model:
     # constructor
     def __init__(self, conf):
         # protected members
+        self._DYNAMICS_FIRST = conf.DYNAMICS_FIRST
         self._robot = conf.robot 
         self._n_x = conf.n_x  
         self._n_u_per_contact = conf.n_u_per_contact
@@ -24,12 +25,6 @@ class Centroidal_model:
         self._N = conf.N 
         self._total_nb_optimizers = self._n_x*(self._N+1) + self._n_u*self._N + \
                                     self._n_t*(self._N+1) + self._n_t*self._N
-        IK_to_Dyn = np.load('IK_to_dyn_centroidal_traj.npz')['X']                             
-        self._x_init = IK_to_Dyn[0]
-        self._x_final = IK_to_Dyn[-1]
-        # self._com_z = conf.com_z
-        # self._x_init = conf.x_init
-        # self._x_final = conf.x_final        
         self._m = conf.robot_mass        # total robot mass
         self._g = conf.gravity_constant  # gravity constant
         self._dt = conf.dt               # discretization time
@@ -44,6 +39,7 @@ class Centroidal_model:
         self._Cov_w = conf.cov_w  
         self._Cov_eta = conf.cov_white_noise                                                           
         # private methods
+        self.__set_init_and_final_states(conf)
         self.__fill_contact_data(conf)
         self.__fill_optimizer_indices()
         self.__fill_initial_trajectory()
@@ -79,6 +75,17 @@ class Centroidal_model:
         return cls(*children)
                                                
     # private methods
+    def __set_init_and_final_states(self, conf):
+        self._DYNAMICS_FIRST = conf.DYNAMICS_FIRST
+        if conf.DYNAMICS_FIRST:
+            self._com_z = conf.com_z
+            self._x_init = conf.x_init
+            self._x_final = conf.x_final   
+        else:
+            IK_to_Dyn = np.load('IK_to_dyn_centroidal_traj.npz')['X']                             
+            self._x_init = IK_to_Dyn[0]
+            self._x_final = IK_to_Dyn[-1]
+    
     def __fill_optimizer_indices(self):  
         self._control_optimizers_indices = {}
         self._state_optimizers_indices = {}
@@ -150,17 +157,21 @@ class Centroidal_model:
         N = self._N
         contact_trajectory = self._contact_trajectory
         init_trajectories = {'state':jnp.zeros((self._n_x, N+1)), 'control':jnp.zeros((self._n_u, N))}
-        for time_idx in range(N):
-            vertices = jnp.array([]).reshape(0, 3)
-            for contact in contact_trajectory:
-                if contact_trajectory[contact][time_idx].ACTIVE:
-                    vertices = jnp.vstack([vertices, contact_trajectory[contact][time_idx].pose.translation])
-            # centeroid = compute_centroid(vertices)
-            # init_trajectories['state'] = jax.ops.index_update(init_trajectories['state'], jax.ops.index[:, time_idx],\
-            #                 jnp.array([centeroid[0], centeroid[1], self._com_z+centeroid[2], 0., 0., 0., 0., 0., 0.]))
-            init_trajectories['control'] = jax.ops.index_update(init_trajectories['control'], jax.ops.index[:, time_idx], 5e-6)
-        # init_trajectories['state'] = jax.ops.index_update(init_trajectories['state'], jax.ops.index[:, -1], init_trajectories['state'][:, -2])
-        init_trajectories['state'] = jnp.array(np.load('IK_to_dyn_centroidal_traj.npz')['X'].T)         
+        if self._DYNAMICS_FIRST:
+            for time_idx in range(N):
+                vertices = jnp.array([]).reshape(0, 3)
+                for contact in contact_trajectory:
+                    if contact_trajectory[contact][time_idx].ACTIVE:
+                        vertices = jnp.vstack([vertices, contact_trajectory[contact][time_idx].pose.translation])
+                centeroid = compute_centroid(vertices)
+                init_trajectories['state'] = jax.ops.index_update(init_trajectories['state'], jax.ops.index[:, time_idx],\
+                                jnp.array([centeroid[0], centeroid[1], self._com_z+centeroid[2], 0., 0., 0., 0., 0., 0.]))
+                init_trajectories['control'] = jax.ops.index_update(init_trajectories['control'], jax.ops.index[:, time_idx], 5e-6)
+            init_trajectories['state'] = jax.ops.index_update(init_trajectories['state'], jax.ops.index[:, -1], init_trajectories['state'][:, -2])
+        else:   
+            init_trajectories['state'] = jnp.array(np.load('IK_to_dyn_centroidal_traj.npz')['X'].T)
+            init_trajectories['control'] =  5e-6*jnp.ones((self._n_u, N))       
+    
         self._init_trajectories = init_trajectories
 
     @partial(jax.jit, static_argnums=(0,)) 
