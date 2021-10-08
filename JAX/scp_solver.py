@@ -11,8 +11,11 @@ def sum_up_all_costs(model):
     QR_cost = construct_total_cost(model) 
     state_trust_region_cost = construct_state_trust_region_cost(model)
     if model._robot=='solo12':
-         IK_regulation_cost = construct_IK_tracking_cost(model)
-         total_cost = [QR_cost, state_trust_region_cost, IK_regulation_cost]
+        if model._DYNAMICS_FIRST:
+             total_cost = [QR_cost, state_trust_region_cost] 
+        elif not model._DYNAMICS_FIRST:
+            IK_regulation_cost = construct_IK_tracking_cost(model)
+            total_cost = [QR_cost, state_trust_region_cost, IK_regulation_cost]   
     elif model._robot=='TALOS':
         total_cost = [QR_cost, state_trust_region_cost]
     Q = np.zeros((model._total_nb_optimizers, model._total_nb_optimizers))
