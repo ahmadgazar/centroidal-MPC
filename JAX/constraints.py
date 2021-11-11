@@ -49,8 +49,49 @@ def construct_dynamics_constraints(model, prev_traj_tuple, traj_data):
 """
 TODO: properly with step poisiton and timing optimization 
 """
-def construct_com_reachability_constraints():
-    return 0.
+@partial(jax.jit, static_argnums=(0,))     
+def construct_com_reachability_constraints(model):
+    n_all, N = model._total_nb_optimizers, model._N
+    max_l = model._max_leg_length
+    contact_trajectory = model._contact_trajectory
+    Aineq_total = np.array([]).reshape(0, n_all)
+    l_total = np.array([])
+    u_total = np.array([])
+    for contact in model._contact_trajectory:
+        # pre-allocate memory for every contact
+        Aineq_x = np.zeros((N, n_all))
+        Aineq_y = np.zeros((N, n_all))
+        Aineq_z = np.zeros((N, n_all))
+        l_x = np.zeros(N)
+        l_y = np.zeros(N)
+        l_z = np.zeros(N)
+        u_x = np.zeros(N)
+        u_y = np.zeros(N)
+        u_z = np.zeros(N)
+        optimizer_objects = model._state_optimizers_indices['coms']
+        for time_idx in range(N):
+            if contact_trajectory[contact][time_idx].ACTIVE:
+                p = contact_trajectory[contact][time_idx].pose.translation
+                for com_dir, optimizer_object in enumerate (optimizer_objects):
+                    optimizer_idx = optimizer_object._optimizer_idx_vector[time_idx]
+                    # x-direction
+                    if com_dir == 0:
+                        Aineq_x[time_idx, optimizer_idx] = -1.
+                        l_x[time_idx] =  - max_l - p[com_dir]
+                        u_x[time_idx] =  max_l - p[com_dir]
+                    # y-direction
+                    elif com_dir == 1:
+                        Aineq_y[time_idx, optimizer_idx] = -1.
+                        l_y[time_idx] = - max_l - p[com_dir]
+                        u_y[time_idx] = max_l - p[com_dir]
+                    # z-direction
+                    elif com_dir == 2:
+                        Aineq_z[time_idx, optimizer_idx] = -1.
+                        u_z[time_idx] = max_l - p[com_dir]            
+        Aineq_total = np.vstack([Aineq_total, Aineq_x, Aineq_y, Aineq_z])
+        l_total = np.hstack([l_total, l_x, l_y, l_z])
+        u_total = np.hstack([u_total, u_x, u_y, u_z])
+    return Constraint(mat=Aineq_total, lb=l_total, ub=u_total)
 
 """
 TODO: construct a control invariant set in the future for MPC to guarantee recursive feasibility 
