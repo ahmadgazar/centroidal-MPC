@@ -15,14 +15,14 @@ def construct_total_cost(model):
 """
 tracking cost on com, lin_mom, ang_mom from IK
 """
-def construct_IK_tracking_cost(model):
+def construct_state_tracking_cost(model):
     n_total = model._total_nb_optimizers
     gradient = np.zeros(n_total)
     com_x_indices = model._state_optimizers_indices['coms'][0]._optimizer_idx_vector
-    IK_centroidal_traj = np.load('IK_to_dyn_centroidal_traj.npz')
+    tracking_traj = model._init_trajectories['state']
     for time_idx in range(model._N+1):
         com_x_idx = com_x_indices[time_idx]
-        gradient[com_x_idx:com_x_idx+9] = -model._state_cost_weights @ IK_centroidal_traj['X'][time_idx]
+        gradient[com_x_idx:com_x_idx+9] = -model._state_cost_weights @ tracking_traj[:, time_idx]
     return Cost(Q=np.zeros((n_total, n_total)),p=gradient)    
 
 """

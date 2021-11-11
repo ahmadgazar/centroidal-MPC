@@ -16,7 +16,7 @@ class Centroidal_model:
     def __init__(self, conf):
         # protected members
         self._DYNAMICS_FIRST = conf.DYNAMICS_FIRST
-        self._robot = conf.robot 
+        self._robot = conf.robot_name 
         self._n_x = conf.n_x  
         self._n_u_per_contact = conf.n_u_per_contact
         self._n_u = conf.n_u  
@@ -25,6 +25,7 @@ class Centroidal_model:
         self._N = conf.N 
         self._total_nb_optimizers = self._n_x*(self._N+1) + self._n_u*self._N + \
                                     self._n_t*(self._N+1) + self._n_t*self._N
+        self._max_leg_length = conf.max_leg_length 
         self._m = conf.robot_mass        # total robot mass
         self._g = conf.gravity_constant  # gravity constant
         self._dt = conf.dt               # discretization time
@@ -82,7 +83,7 @@ class Centroidal_model:
             self._x_init = conf.x_init
             self._x_final = conf.x_final   
         else:
-            IK_to_Dyn = np.load('IK_to_dyn_centroidal_traj.npz')['X']                             
+            IK_to_Dyn = np.load('wholeBody_to_centroidal_traj.npz')['X']                             
             self._x_init = IK_to_Dyn[0]
             self._x_final = IK_to_Dyn[-1]
     
@@ -123,7 +124,7 @@ class Centroidal_model:
         # self._control_slack_optimizers_indices = Slack_optimizer('control', self._n_x, self._n_u, self._n_t, self._N) 
     
     def __fill_contact_data(self, conf):
-        contact_trajectory = create_contact_trajectory(conf) 
+        contact_trajectory = create_contact_trajectory(conf)
         contacts_logic = []
         contacts_orientation = []
         contacts_position = []
@@ -169,9 +170,8 @@ class Centroidal_model:
                 init_trajectories['control'] = jax.ops.index_update(init_trajectories['control'], jax.ops.index[:, time_idx], 5e-6)
             init_trajectories['state'] = jax.ops.index_update(init_trajectories['state'], jax.ops.index[:, -1], init_trajectories['state'][:, -2])
         else:   
-            init_trajectories['state'] = jnp.array(np.load('IK_to_dyn_centroidal_traj.npz')['X'].T)
-            init_trajectories['control'] =  5e-6*jnp.ones((self._n_u, N))       
-    
+            init_trajectories['state'] = jnp.array(np.load('wholeBody_to_centroidal_traj.npz')['X'].T)
+            init_trajectories['control'] =  5e-6*jnp.ones((self._n_u, N))
         self._init_trajectories = init_trajectories
 
     @partial(jax.jit, static_argnums=(0,)) 

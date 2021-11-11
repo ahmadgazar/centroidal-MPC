@@ -3,6 +3,7 @@ import pinocchio as pin
 import jax.numpy as jnp 
 import matplotlib.pyplot as plt
 from collections import namedtuple
+from utils import compute_5th_order_poly_traj
 
 class Debris():
     def __init__(self, CONTACT, t_start=0.0, t_end=1.0, x=None, y=None, z=None, axis=None, angle=None, ACTIVE=False):
@@ -44,34 +45,6 @@ def create_contact_trajectory(conf):
                 contact_trajectory[contact.CONTACT].append(contact)  
     return contact_trajectory                
 
-# Generate trajectory using 3rd order polynomial with following constraints:
-# x(0)=x0, x(T)=x1, dx(0)=dx(T)=0
-# x(t) = a + b t + c t^2 + d t^3
-# x(0) = a = x0
-# dx(0) = b = 0
-# dx(T) = 2 c T + 3 d T^2 = 0 => c = -3 d T^2 / (2 T) = -(3/2) d T
-# x(T) = x0 + c T^2 + d T^3 = x1
-#        x0 -(3/2) d T^3 + d T^3 = x1
-#        -0.5 d T^3 = x1 - x0
-#        d = 2 (x0-x1) / T^3
-# c = -(3/2) T 2 (x0-x1) / (T^3) = 3 (x1-x0) / T^2
-def compute_3rd_order_poly_traj(x0, x1, T, dt):
-    a = x0
-    b = np.zeros_like(x0)
-    c = 3*(x1-x0) / (T**2)
-    d = 2*(x0-x1) / (T**3)
-    N = int(T/dt)
-    n = x0.shape[0]
-    x = np.zeros((n,N))
-    dx = np.zeros((n,N))
-    ddx = np.zeros((n,N))
-    for i in range(N):
-        t = i*dt
-        x[:,i]   = a + b*t + c*t**2 + d*t**3
-        dx[:,i]  = b + 2*c*t + 3*d*t**2
-        ddx[:,i] = 2*c + 6*d*t
-    return x, dx, ddx
-
 def compute_foot_traj(conf):
     step_height = conf.step_height
     dt_ctrl = conf.dt_ctrl
@@ -95,19 +68,19 @@ def compute_foot_traj(conf):
             # foot is in the air
             elif not contact.ACTIVE:
                 x0 = previous_contact_sequence[contact.idx].pose.translation 
-                x1 = next_contact_sequence[contact.idx].pose.translation
+                x1 = next_contact_sequence[contact.idx].pose.translation 
                 # x and y directions
-                x, xdot, xddot = compute_3rd_order_poly_traj(x0[:2], x1[:2], (contact.t_end-contact.t_start), dt_ctrl)
+                x, xdot, xddot = compute_5th_order_poly_traj(x0[:2], x1[:2], (contact.t_end-contact.t_start), dt_ctrl)
                 foot_traj_dict[contact.CONTACT]['x'][:2, t_start_idx:t_end_idx] = x
                 foot_traj_dict[contact.CONTACT]['x_dot'][:2, t_start_idx:t_end_idx] = xdot
                 foot_traj_dict[contact.CONTACT]['x_ddot'][:2, t_start_idx:t_end_idx] = xddot
                 # z direction (interpolate half way from zero to a step height)
-                x_up, xdot_up, xddot_up = compute_3rd_order_poly_traj(np.array([0.]), np.array([step_height]), 0.5*(contact.t_end-contact.t_start), dt_ctrl)
+                x_up, xdot_up, xddot_up = compute_5th_order_poly_traj(np.array([0.]), np.array([step_height]), 0.5*(contact.t_end-contact.t_start), dt_ctrl)
                 foot_traj_dict[contact.CONTACT]['x'][2, t_start_idx:t_start_idx+int(0.5*N_contact)] = x_up
                 foot_traj_dict[contact.CONTACT]['x_dot'][2, t_start_idx:t_start_idx+int(0.5*N_contact)] = xdot_up
                 foot_traj_dict[contact.CONTACT]['x_ddot'][2, t_start_idx:t_start_idx+int(0.5*N_contact)] = xddot_up
                 # z direction (interpolate half way back from a step height to the ground)
-                x_down, xdot_down, xddot_down = compute_3rd_order_poly_traj(np.array([step_height]), np.array([0.]), 0.5*(contact.t_end-contact.t_start), dt_ctrl)
+                x_down, xdot_down, xddot_down = compute_5th_order_poly_traj(np.array([step_height]), np.array([0.]), 0.5*(contact.t_end-contact.t_start), dt_ctrl)
                 foot_traj_dict[contact.CONTACT]['x'][2, t_start_idx+int(0.5*N_contact):t_end_idx] = x_down 
                 foot_traj_dict[contact.CONTACT]['x_dot'][2, t_start_idx+int(0.5*N_contact):t_end_idx] = xdot_down 
                 foot_traj_dict[contact.CONTACT]['x_ddot'][2, t_start_idx+int(0.5*N_contact):t_end_idx] = xddot_down 
