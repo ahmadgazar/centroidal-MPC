@@ -1,100 +1,72 @@
-from contact_plan import Debris
-import numpy as np
+from contact_plan import create_contact_sequence
+from utils import compute_centroid
+import example_robot_data
+import numpy as np 
+import pinocchio
 
 # walking parameters:
 # -------------------
-dt = 0.05
-mu = 0.1 # linear friction coefficient
+DYNAMICS_FIRST = False
+dt = 0.01
+dt_ctrl = 0.001
 
-# robot contacts
-# --------------
-robot = 'solo12'
-# state and control dimensions
-# ----------------------------
+gait = {'type': 'BOUND',
+      'stepLength' : 0.1,
+      'stepHeight' : 0.1,
+      'stepKnots' : 15,
+      'supportKnots' : 10,
+      'nbSteps': 6}      
+
+mu = 0.2 # linear friction coefficient
+
+# robot model and parameters
+# --------------------------
+robot_name = 'solo12'
+ee_frame_names = ['FL_FOOT', 'FR_FOOT', 'HL_FOOT', 'HR_FOOT']
+robot = example_robot_data.load('solo12')
+rmodel = robot.model
+rdata = rmodel.createData()
+robot_mass = pinocchio.computeTotalMass(rmodel)
+gravity_constant = -9.81 
+max_leg_length = 0.34                          
+foot_scaling  = 1.
+lxp = 0.01  # foot length in positive x direction
+lxn = 0.01  # foot length in negative x direction
+lyp = 0.01  # foot length in positive y direction
+lyn = 0.01  # foot length in negative y direction
+
+# centroidal state and control dimensions
+# ---------------------------------------
 n_u_per_contact = 3
 nb_contacts = 4
 n_u = nb_contacts*n_u_per_contact
 n_x = 9
 n_t = 1
 
-# bounding sequence
-# -----------------
-contact_sequence = [[Debris(CONTACT='FR', t_start=0.00, t_end=1.00, x=0.20,  y=-0.15, z=0.0, axis=[-1, 0], angle=0.0, ACTIVE=True), Debris(CONTACT='FL',t_start=0.00, t_end=1.00, x=0.20, y=0.15, z=0.0, axis=[1, 0],angle=0.0, ACTIVE=True),
-                     Debris(CONTACT='HR', t_start=0.00, t_end=1.00, x=-0.20, y=-0.15, z=0.0, axis=[-1, 0], angle=0.0, ACTIVE=True), Debris(CONTACT='HL',t_start=0.00, t_end=1.00, x=-0.20,y=0.15, z=0.0, axis=[1, 0],angle=0.0, ACTIVE=True)],
+gait_templates, contact_sequence = create_contact_sequence(dt, gait, ee_frame_names, rmodel, rdata)
+           
+# intiial and final conditions:
+# -----------------------------
+if DYNAMICS_FIRST:
+      com_z = 0.20   
+      x_init =  np.array([0., 0., com_z, 0., 0., 0., 0., 0., 0.])
+      final_contact_sequence = contact_sequence[-1]
+      vertices = np.array([]).reshape(0, 3)
+      for contact in final_contact_sequence:
+            if contact.ACTIVE:
+                  vertices = np.vstack([vertices, contact.pose.translation])
+            centeroid = compute_centroid(vertices)
+            x_final = np.array([centeroid[0], centeroid[1], com_z+centeroid[2], 
+                                                      0., 0., 0., 0., 0., 0.])
+# planning and control horizon lengths:
+# -------------------------------------
+N = int(round(contact_sequence[-1][0].t_end/dt, 2))
+N_ctrl = int(N*(dt/dt_ctrl))    
 
-                    [Debris(CONTACT='FR', t_start=1.00, t_end=1.20                                                  , ACTIVE=False), Debris(CONTACT='FL',t_start=1.00, t_end=1.20                                              , ACTIVE=False),
-                     Debris(CONTACT='HR', t_start=1.00, t_end=1.20, x=-0.20, y=-0.15, z=0.0, axis=[-1, 0], angle=0.0, ACTIVE=True), Debris(CONTACT='HL', t_start=1.00, t_end=1.20, x=-0.20,y=0.15, z=0.0, axis=[1, 0],angle=0.0, ACTIVE=True)],
-                    
-                    [Debris(CONTACT='FR', t_start=1.20, t_end=1.50, x=0.20,  y=-0.15, z=0.0, axis=[-1, 0], angle=0.0, ACTIVE=True), Debris(CONTACT='FL', t_start=1.20, t_end=1.50, x=0.20, y=0.15, z=0.0, axis=[1, 0],angle=0.0, ACTIVE=True),
-                     Debris(CONTACT='HR', t_start=1.20, t_end=1.50                                                  , ACTIVE=False), Debris(CONTACT='HL',t_start=1.20, t_end=1.50                                              , ACTIVE=False)],
-
-                    [Debris(CONTACT='FR', t_start=1.50, t_end=1.70                                                   ,ACTIVE=False), Debris(CONTACT='FL', t_start=1.50, t_end=1.70                                             , ACTIVE=False),
-                     Debris(CONTACT='HR', t_start=1.50, t_end=1.70                                                   , ACTIVE=False), Debris(CONTACT='HL', t_start=1.50, t_end=1.70                                             , ACTIVE=False)],
-
-                    [Debris(CONTACT='FR', t_start=1.70, t_end=2.00                                                 , ACTIVE=False), Debris(CONTACT='FL', t_start=1.70, t_end=2.00                                             , ACTIVE=False),
-                    Debris(CONTACT='HR', t_start=1.70, t_end=2.00, x=-0.20, y=-0.15, z=0.0, axis=[-1, 0], angle=0.0, ACTIVE=True), Debris(CONTACT='HL', t_start=1.70, t_end=2.00, x=-0.20,y=0.15, z=0.0, axis=[1, 0],angle=0.0, ACTIVE=True)],
-
-                    [Debris(CONTACT='FR', t_start=2.00, t_end=2.20                                                  , ACTIVE=False), Debris(CONTACT='FL',t_start=2.00, t_end=2.20                                             ,ACTIVE=False),
-                    Debris(CONTACT='HR', t_start=2.00, t_end=2.20                                                   , ACTIVE=False), Debris(CONTACT='HL', t_start=2.00, t_end=2.20                                            ,ACTIVE=False)],
-
-                    [Debris(CONTACT='FR', t_start=2.20, t_end=2.50, x=0.20,  y=-0.15, z=0.0, axis=[-1, 0], angle=0.0, ACTIVE=True), Debris(CONTACT='FL',t_start=2.20, t_end=2.50, x=0.20, y=0.15, z=0.0, axis=[1, 0],angle=0.0, ACTIVE=True),
-                    Debris(CONTACT='HR', t_start=2.20, t_end=2.50                                                  , ACTIVE=False), Debris(CONTACT='HL',t_start=2.20, t_end=2.50                                              , ACTIVE=False)],
-
-                    [Debris(CONTACT='FR', t_start=2.50, t_end=2.70                                                , ACTIVE=False), Debris(CONTACT='FL',t_start=2.50, t_end=2.70                                              , ACTIVE=False),
-                    Debris(CONTACT='HR', t_start=2.50, t_end=2.70                                                 , ACTIVE=False), Debris(CONTACT='HL',t_start=2.50, t_end=2.70                                              , ACTIVE=False)],
-
-                    [Debris(CONTACT='FR',t_start=2.70, t_end=3.00                                                 , ACTIVE=False), Debris(CONTACT='FL', t_start=2.70, t_end=3.00                                             , ACTIVE=False),
-                    Debris(CONTACT='HR', t_start=2.70, t_end=3.00, x=-0.20, y=-0.15, z=0.0, axis=[-1, 0], angle=0.0, ACTIVE=True), Debris(CONTACT='HL',t_start=2.70, t_end=3.00, x=-0.20,y=0.15, z=0.0, axis=[1, 0],angle=0.0, ACTIVE=True)],
-
-                    [Debris(CONTACT='FR',t_start=3.00, t_end=3.20                                                 , ACTIVE=False), Debris(CONTACT='FL',t_start=3.00, t_end=3.20                                              , ACTIVE=False),
-                    Debris(CONTACT='HR', t_start=3.00, t_end=3.20                                                 , ACTIVE=False), Debris(CONTACT='HL',t_start=3.00, t_end=3.20                                              , ACTIVE=False)],
-
-                    [Debris(CONTACT='FR', t_start=3.20, t_end=3.50, x=0.20,  y=-0.15, z=0.0, axis=[-1, 0], angle=0.0, ACTIVE=True), Debris(CONTACT='FL',t_start=3.20, t_end=3.50, x=0.20, y=0.15, z=0.0, axis=[1, 0],angle=0.0, ACTIVE=True),
-                    Debris(CONTACT='HR', t_start=3.20, t_end=3.50,                                                  ACTIVE=False), Debris(CONTACT='HL',t_start=3.20, t_end=3.50                                               , ACTIVE=False)],
-                    
-                    [Debris(CONTACT='FR', t_start=3.50, t_end=3.70                                                 , ACTIVE=False), Debris(CONTACT='FL',t_start=3.50, t_end=3.70                                              , ACTIVE=False),
-                    Debris(CONTACT='HR', t_start=3.50, t_end=3.70                                                 , ACTIVE=False), Debris(CONTACT='HL',t_start=3.50, t_end=3.70                                               , ACTIVE=False)],
-                    
-                    [Debris(CONTACT='FR', t_start=3.70, t_end=4.00                                                 , ACTIVE=False), Debris(CONTACT='FL', t_start=3.70, t_end=4.00                                              , ACTIVE=False),
-                    Debris(CONTACT='HR' , t_start=3.70, t_end=4.00, x=-0.20, y=-0.15, z=0.0, axis=[-1, 0], angle=0.0, ACTIVE=True), Debris(CONTACT='HL',t_start=3.70, t_end=4.00, x=-0.20,y=0.15, z=0.0, axis=[1, 0],angle=0.0, ACTIVE=True)],
-
-                    [Debris(CONTACT='FR', t_start=4.00, t_end=4.20                                                 , ACTIVE=False), Debris(CONTACT='FL', t_start=4.00, t_end=4.20                                              , ACTIVE=False),
-                    Debris(CONTACT='HR' , t_start=4.00, t_end=4.20                                                 , ACTIVE=False), Debris(CONTACT='HL',t_start=4.00, t_end=4.20                                               , ACTIVE=False)],
-
-                    [Debris(CONTACT='FR', t_start=4.20, t_end=4.50, x=0.20,  y=-0.15, z=0.0, axis=[-1, 0], angle=0.0, ACTIVE=True), Debris(CONTACT='FL', t_start=4.20, t_end=4.50, x=0.20, y=0.15, z=0.0, axis=[1, 0],angle=0.0, ACTIVE=True),
-                    Debris(CONTACT='HR' , t_start=4.20, t_end=4.50                                                 , ACTIVE=False), Debris(CONTACT='HL',t_start=4.20, t_end=4.50                                               , ACTIVE=False)],
-
-                    [Debris(CONTACT='FR', t_start=4.50, t_end=4.70                                                 , ACTIVE=False), Debris(CONTACT='FL', t_start=4.50, t_end=4.70                                              , ACTIVE=False),
-                    Debris(CONTACT='HR' , t_start=4.50, t_end=4.70                                                 , ACTIVE=False), Debris(CONTACT='HL',t_start=4.50, t_end=4.70                                               , ACTIVE=False)],
-                    
-                    [Debris(CONTACT='FR', t_start=4.70, t_end=5.00                                                 , ACTIVE=False), Debris(CONTACT='FL', t_start=4.70, t_end=5.00                                              , ACTIVE=False),
-                    Debris(CONTACT='HR' , t_start=4.70, t_end=5.00, x=-0.20, y=-0.15, z=0.0, axis=[-1, 0], angle=0.0, ACTIVE=True), Debris(CONTACT='HL',t_start=4.70, t_end=5.00, x=-0.20, y=0.15, z=0.0, axis=[1, 0],angle=0.0, ACTIVE=True)],
-
-                    [Debris(CONTACT='FR', t_start=5.00, t_end=5.20                                                 , ACTIVE=False), Debris(CONTACT='FL', t_start=5.00, t_end=5.20                                              , ACTIVE=False),
-                    Debris(CONTACT='HR' , t_start=5.00, t_end=5.20                                                 , ACTIVE=False), Debris(CONTACT='HL',t_start=5.00, t_end=5.20                                               , ACTIVE=False)],
-
-                    [Debris(CONTACT='FR', t_start=5.20, t_end=5.70, x=0.20,  y=-0.15, z=0.0, axis=[-1, 0], angle=0.0, ACTIVE=True), Debris(CONTACT='FL', t_start=5.20, t_end=5.70, x=0.20, y=0.15, z=0.0, axis=[1, 0],angle=0.0, ACTIVE=True),
-                    Debris(CONTACT='HR' , t_start=5.20, t_end=5.70                                                 , ACTIVE=False), Debris(CONTACT='HL',t_start=5.20, t_end=5.70                                               , ACTIVE=False)],
-                    
-                    [Debris(CONTACT='FR', t_start=5.70, t_end=5.90, x=0.20,  y=-0.15, z=0.0, axis=[-1, 0], angle=0.0, ACTIVE=True), Debris(CONTACT='FL', t_start=5.70, t_end=5.90, x=0.20, y=0.15, z=0.0, axis=[1, 0],angle=0.0, ACTIVE=True),
-                    Debris(CONTACT='HR', t_start=5.70, t_end=5.90, x=-0.20, y=-0.15, z=0.0, axis=[-1, 0], angle=0.0, ACTIVE=True), Debris(CONTACT='HL', t_start=5.70, t_end=5.90,x=-0.20,y=0.15, z=0.0, axis=[1, 0],angle=0.0, ACTIVE=True)]] 
-
-
-N = int(contact_sequence[-1][0].t_end/dt)    
 # LQR gains (for stochastic control)
 # ----------------------------------
 Q = 0.1*np.eye(n_x)
 R = 1*np.eye(n_u)
-
-# robot parameters:
-# -----------------
-robot_mass = 2.2
-gravity_constant = -9.81 
-foot_scaling  = 1.
-lxp = foot_scaling*0.01  # foot length in positive x direction
-lxn = foot_scaling*0.01  # foot length in negative x direction
-lyp = foot_scaling*0.01  # foot length in positive y direction
-lyn = foot_scaling*0.01  # foot length in negative y direction
 
 # noise parameters:
 # -----------------
@@ -102,16 +74,21 @@ n_w = nb_contacts*3  # no. of contact position parameters
 cov_w = 0.01*np.eye(n_w)
 cov_white_noise = 0.001*np.eye(n_x)
 
-# cost objective weights:
-# -----------------------
-state_cost_weights = np.diag([1e3, 1e3, 1e3, 1e6, 1e6, 1e6, 1e8, 1e8, 1e8])
-control_cost_weights = np.diag([1e2, 1e2, 1e2, 
-                                1e2, 1e2, 1e2,
-                                1e2, 1e2, 1e2,
-                                1e2, 1e2, 1e2])
+# centroidal cost objective weights:
+# ----------------------------------
+state_cost_weights = np.diag([1e3, 1e3, 1e3, 1e4, 1e4, 1e4, 1e8, 1e8, 1e8])
+control_cost_weights = np.diag([1e2, 1e2, 1e1, 
+                                1e2, 1e2, 1e1,
+                                1e2, 1e2, 1e1,
+                                1e2, 1e2, 1e1])
+# whole-body cost objective weights:
+# ----------------------------------
+whole_body_task_weights = {'footTrack':1e9, 'footImpact':1e1, 'comTrack':1e6, 'stateBounds':1e3, 
+                            'stateReg':1e3, 'ctrlReg':1e2, 'frictionCone':0e3,
+                            'centroidalTrack': 1e6, 'contactForceTrack':1e3}                            
 # SCP solver parameters:
 # --------------------- 
-scp_params  = {"trust_region_radius0":  10,
+scp_params  = {"trust_region_radius0":  50,
               "omega0":                100,
            "omega_max":             1.0e10,
              "epsilon":             1.0e-6,
@@ -123,3 +100,9 @@ scp_params  = {"trust_region_radius0":  10,
 "convergence_threshold":              1e-3,
       "max_iterations":                 20,
              "padding":                 0.1}
+
+# Gepetto viewer:
+cameraTF = [2., 2.68, 0.84, 0.2, 0.62, 0.72, 0.22]
+WITHDISPLAY = True
+WITHPLOT = True
+SAVEDAT = True             

@@ -9,13 +9,12 @@ import pinocchio
 DYNAMICS_FIRST = False
 dt = 0.01
 dt_ctrl = 0.001
-
-gait ={'type': 'PACE',
+gait ={'type': 'TROT',
       'stepLength' : 0.1,
-      'stepHeight' : 0.1,
-      'stepKnots' : 8,
-      'supportKnots' : 25,
-      'nbSteps': 6}      
+      'stepHeight' : 0.05,
+      'stepKnots' : 25,
+      'supportKnots' : 10,
+      'nbSteps': 6}
 
 mu = 0.2 # linear friction coefficient
 
@@ -83,9 +82,9 @@ control_cost_weights = np.diag([1e2, 1e2, 1e1,
                                 1e2, 1e2, 1e1])
 # whole-body cost objective weights:
 # ----------------------------------
-whole_body_task_weights = {'footTrack':1e9, 'footImpact':1e1, 'comTrack':1e6, 'stateBounds':1e3, 
-                            'stateReg':1e3, 'ctrlReg':1e2, 'frictionCone':0e3,
-                            'centroidalTrack': 1e6, 'contactForceTrack':1e3}                            
+whole_body_task_weights = {'footTrack':1e8, 'footImpact':1e1, 'comTrack':1e6, 'stateBounds':1e3, 
+                            'stateReg':1e3, 'ctrlReg':1e2, 'frictionCone':1e1,
+                            'centroidalTrack': 1e6, 'contactForceTrack':1e2}                      
 # SCP solver parameters:
 # --------------------- 
 scp_params  = {"trust_region_radius0":  50,
@@ -105,4 +104,4 @@ scp_params  = {"trust_region_radius0":  50,
 cameraTF = [2., 2.68, 0.84, 0.2, 0.62, 0.72, 0.22]
 WITHDISPLAY = True
 WITHPLOT = True
-SAVEDAT = True             
+SAVEDAT = True
