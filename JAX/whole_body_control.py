@@ -8,18 +8,19 @@ class WholeBodyModel:
         self.dt = conf.dt
         self.dt_ctrl = conf.dt_ctrl
         self.robot_name = conf.robot_name
+        # self.q0 = conf.q0
         self.rmodel = conf.rmodel
         self.rdata = conf.rmodel.createData()
         self.ee_frame_names = conf.ee_frame_names 
-        self.gait = conf.gait 
+        self.gait = conf.gait
+        self.gait_templates = conf.gait_templates 
         self.task_weights = conf.whole_body_task_weights
         # Defining the friction coefficient and normal
         self.mu = conf.mu
         self.N = conf.N
         self.Rsurf = np.eye(3)
-        self.__initialize_robot()
+        self.__initialize_robot(conf.q0)
         self.__set_contact_frame_names_and_indices()
-        self.__create_gait_templates()
         self.__load_centroidal_tracking_traj()
 
     def __set_contact_frame_names_and_indices(self):
@@ -30,22 +31,12 @@ class WholeBodyModel:
             self.lhFootId = self.rmodel.getFrameId(ee_frame_names[2])
             self.rhFootId = self.rmodel.getFrameId(ee_frame_names[3])
 
-    def __initialize_robot(self):
-        self.q0 = self.rmodel.referenceConfigurations['standing'].copy() 
-        self.rmodel.defaultState = np.concatenate([self.q0, np.zeros(self.rmodel.nv)])
+    def __initialize_robot(self, q0):
+        #self.q0 = self.rmodel.referenceConfigurations['standing'].copy() 
+        self.rmodel.defaultState = np.concatenate([q0, np.zeros(self.rmodel.nv)])
         # create croccodyl state and controls
         self.state = crocoddyl.StateMultibody(self.rmodel)
         self.actuation = crocoddyl.ActuationModelFloatingBase(self.state)
-
-    def __create_gait_templates(self):
-        nb_steps = self.gait['nbSteps']
-        self.gait_templates = []
-        if self.gait['type']=='TROT':
-            for step in range (nb_steps):
-                if step < nb_steps-1:
-                    self.gait_templates += [['doubleSupport', 'rflhStep', 'doubleSupport', 'lfrhStep']]
-                else:
-                    self.gait_templates += [['doubleSupport', 'rflhStep', 'doubleSupport', 'lfrhStep', 'doubleSupport']]
 
     def __load_centroidal_tracking_traj(self):
         if self.TRACK_CENTROIDAL:
@@ -53,7 +44,7 @@ class WholeBodyModel:
             self.U = np.load('centroidal_to_wholeBody_traj.npz')['U']
 
     def add_swing_feet_tracking_costs(self, cost, swing_feet_tasks):
-        weight = self.task_weights['footTrack']
+        weight = self.task_weights['footTrack']['swing']
         for task in swing_feet_tasks:
             frame_position_residual = crocoddyl.ResidualModelFrameTranslation(self.state,
                                          task[0], task[1].translation, self.actuation.nu)
@@ -62,8 +53,8 @@ class WholeBodyModel:
     
     def add_swing_feet_impact_costs(self, cost, swing_feet_tasks):
         nu = self.actuation.nu
-        foot_pos_weight = self.task_weights['footTrack']
-        foot_impact_weight = self.task_weights['footImpact']
+        foot_pos_weight = self.task_weights['footTrack']['impact']
+        foot_impact_weight = self.task_weights['impulseVel']
         for i in swing_feet_tasks:
             frameTranslationResidual = crocoddyl.ResidualModelFrameTranslation(self.state, i[0], i[1].translation, nu)
             frameVelocityResidual = crocoddyl.ResidualModelFrameVelocity(self.state, i[0], pinocchio.Motion.Zero(),
@@ -96,7 +87,7 @@ class WholeBodyModel:
                 if frame_idx == self.rhFootId:
                     spatial_force_des = pinocchio.Force(forceTask[6:9], np.zeros(3)) 
                 if frame_idx == self.lhFootId:
-                    spatial_force_des = pinocchio.Force(forceTask[6:9], np.zeros(3)) 
+                    spatial_force_des = pinocchio.Force(forceTask[9:12], np.zeros(3)) 
                 force_residual = crocoddyl.ResidualModelContactForce(state, frame_idx, spatial_force_des, nu_contact, nu)
                 force_track = crocoddyl.CostModelResidual(state, force_residual)
                 cost.addCost(self.rmodel.frames[frame_idx].name +"contactForceTrack", force_track, forceTrackWeight)
@@ -104,7 +95,7 @@ class WholeBodyModel:
     def add_com_position_tracking_cost(self, cost, com_des):    
         com_residual = crocoddyl.ResidualModelCoMPosition(self.state, com_des, self.actuation.nu)
         com_track = crocoddyl.CostModelResidual(self.state, com_residual)
-        cost.addCost("comTrack", com_track, self.task_weights['footTrack'])
+        cost.addCost("comTrack", com_track, self.task_weights['comTrack'])
     
     def add_centroidal_momentum_tracking_cost(self, cost, hg_des):
         state, nu = self.state, self.actuation.nu
@@ -113,10 +104,14 @@ class WholeBodyModel:
         hg_track = crocoddyl.CostModelResidual(state, hg_residual)
         cost.addCost("centroidalTrack", hg_track, weight)        
 
-    def add_stat_ctrl_reg_costs(self, cost):
+    def add_stat_ctrl_reg_costs(self, cost, preImpact):
         nu = self.actuation.nu 
         stateWeights = np.array([0.]*3 + [500.]*3 + [0.01]*(self.rmodel.nv - 6) + [10.] * 6 + [1.]*(self.rmodel.nv - 6))
-        state_reg_weight, control_reg_weight = self.task_weights['stateReg'], self.task_weights['ctrlReg']
+        if preImpact:
+            state_reg_weight, control_reg_weight = self.task_weights['stateReg']['impact'], self.task_weights['ctrlReg']['impact']
+        else:
+            state_reg_weight, control_reg_weight = self.task_weights['stateReg']['stance'], self.task_weights['ctrlReg']['stance']
+   
         state_bounds_weight = self.task_weights['stateBounds']
         # state regularization cost
         stateResidual = crocoddyl.ResidualModelState(self.state, self.rmodel.defaultState, nu)
@@ -135,14 +130,48 @@ class WholeBodyModel:
         ctrlReg = crocoddyl.CostModelResidual(self.state, ctrlResidual)
         cost.addCost("ctrlReg", ctrlReg, control_reg_weight)
     
-    def add_terminal_costs(self):
-        comTask = self.X[:3, -1]
-        centroidalTask = self.X[3:9, -1]
+    def add_terminal_costs(self, feetPos):
+        supportFeetIds = [self.lfFootId, self.rfFootId, self.lhFootId, self.rhFootId]
+        swingFootTask = []
+        for i, p in zip(supportFeetIds, feetPos):
+            swingFootTask += [[i, pinocchio.SE3(np.eye(3), p)]]
         terminalCostModel = self.createSwingFootModel([self.lfFootId, self.rfFootId, self.lhFootId, self.rhFootId], 
-                                                comTask=comTask, centroidalTask=centroidalTask)                            
+                    swingFootTask=swingFootTask, comTask=self.X[:3, -1], centroidalTask=self.X[3:9, -1],forceTask=self.U[:, -1])                            
         return terminalCostModel                    
-
-    def createShootingProblem(self):
+        
+    def createTrotShootingProblem(self):
+        # Compute the current foot positions
+        x0 = self.rmodel.defaultState
+        q0 = x0[:self.rmodel.nq]
+        pinocchio.forwardKinematics(self.rmodel, self.rdata, q0)
+        pinocchio.updateFramePlacements(self.rmodel, self.rdata)
+        rfFootPos0 = self.rdata.oMf[self.rfFootId].translation
+        rhFootPos0 = self.rdata.oMf[self.rhFootId].translation
+        lfFootPos0 = self.rdata.oMf[self.lfFootId].translation
+        lhFootPos0 = self.rdata.oMf[self.lhFootId].translation 
+        self.comRef = (rfFootPos0 + rhFootPos0 + lfFootPos0 + lhFootPos0) / 4
+        self.comRef[2] = pinocchio.centerOfMass(self.rmodel, self.rdata, q0)[2].item()
+        self.time_idx = 0
+        # Defining the action models along the time instances
+        loco3dModel = []
+        for gait in self.gait_templates:
+            for phase in gait:
+                if phase == 'doubleSupport':
+                    loco3dModel += self.createDoubleSupportFootstepModels([lfFootPos0, rfFootPos0, lhFootPos0, rhFootPos0])
+                elif phase == 'rflhStep':
+                    loco3dModel += self.createSingleSupportFootstepModels([rfFootPos0, lhFootPos0], [self.lfFootId, self.rhFootId],
+                                                                                                    [self.rfFootId, self.lhFootId])
+                elif phase == 'lfrhStep':
+                    loco3dModel += self.createSingleSupportFootstepModels([lfFootPos0, rhFootPos0], [self.rfFootId, self.lhFootId], 
+                                                                                                    [self.lfFootId, self.rhFootId])
+        if self.TRACK_CENTROIDAL:
+            loco3dModelTerminal = self.add_terminal_costs([lfFootPos0, rfFootPos0, lhFootPos0, rhFootPos0])
+        else:
+            loco3dModelTerminal = loco3dModel[-1]             
+        problem = crocoddyl.ShootingProblem(x0, loco3dModel, loco3dModelTerminal)
+        return problem
+        
+    def createPaceShootingProblem(self):
         # Compute the current foot positions
         x0 = self.rmodel.defaultState
         q0 = x0[:self.rmodel.nq]
@@ -161,19 +190,51 @@ class WholeBodyModel:
             for phase in gait:
                 if phase == 'doubleSupport':
                     loco3dModel += self.createDoubleSupportFootstepModels([lfFootPos0, rfFootPos0, lhFootPos0, rhFootPos0])
-                elif phase == 'rflhStep':
-                    loco3dModel += self.createSingleSupportFootstepModels([rfFootPos0, lhFootPos0], [self.lfFootId, self.rhFootId],
-                                                                                                    [self.rfFootId, self.lhFootId])
-                elif phase == 'lfrhStep':
-                    loco3dModel += self.createSingleSupportFootstepModels([lfFootPos0, rhFootPos0], [self.rfFootId, self.lhFootId], 
-                                                                                                    [self.lfFootId, self.rhFootId])
+                elif phase == 'rfrhStep':
+                    loco3dModel += self.createSingleSupportFootstepModels([rfFootPos0, rhFootPos0], [self.lfFootId, self.lhFootId],
+                                                                                                    [self.rfFootId, self.rhFootId])
+                elif phase == 'lflhStep':
+                    loco3dModel += self.createSingleSupportFootstepModels([lfFootPos0, lhFootPos0], [self.rfFootId, self.rhFootId], 
+                                                                                                    [self.lfFootId, self.lhFootId])
         if self.TRACK_CENTROIDAL:
-            loco3dModelTerminal = self.add_terminal_costs()
+            loco3dModelTerminal = self.add_terminal_costs([lfFootPos0, rfFootPos0, lhFootPos0, rhFootPos0])
         else:
             loco3dModelTerminal = loco3dModel[-1]             
         problem = crocoddyl.ShootingProblem(x0, loco3dModel, loco3dModelTerminal)
         return problem
-        
+
+    def createBoundShootingProblem(self):
+         # Compute the current foot positions
+        x0 = self.rmodel.defaultState
+        q0 = x0[:self.rmodel.nq]
+        pinocchio.forwardKinematics(self.rmodel, self.rdata, q0)
+        pinocchio.updateFramePlacements(self.rmodel, self.rdata)
+        rfFootPos0 = self.rdata.oMf[self.rfFootId].translation
+        rhFootPos0 = self.rdata.oMf[self.rhFootId].translation
+        lfFootPos0 = self.rdata.oMf[self.lfFootId].translation
+        lhFootPos0 = self.rdata.oMf[self.lhFootId].translation
+        self.comRef = (rfFootPos0 + rhFootPos0 + lfFootPos0 + lhFootPos0) / 4
+        self.comRef[2] = pinocchio.centerOfMass(self.rmodel, self.rdata, q0)[2].item()
+        self.time_idx = 0
+        # Defining the action models along the time instances
+        loco3dModel = []
+        for gait in self.gait_templates:
+            for phase in gait:
+                if phase == 'doubleSupport':
+                    loco3dModel += self.createDoubleSupportFootstepModels([lfFootPos0, rfFootPos0, lhFootPos0, rhFootPos0])
+                elif phase == 'rflfStep':
+                    loco3dModel += self.createSingleSupportFootstepModels([rfFootPos0, lfFootPos0], [self.rhFootId, self.lhFootId],
+                                                                                                    [self.rfFootId, self.lfFootId])
+                elif phase == 'rhlhStep':
+                    loco3dModel += self.createSingleSupportFootstepModels([rhFootPos0, lhFootPos0], [self.rfFootId, self.lfFootId], 
+                                                                                                    [self.rhFootId, self.lhFootId])
+        if self.TRACK_CENTROIDAL:
+            loco3dModelTerminal = self.add_terminal_costs([lfFootPos0, rfFootPos0, lhFootPos0, rhFootPos0])
+        else:
+            loco3dModelTerminal = loco3dModel[-1]             
+        problem = crocoddyl.ShootingProblem(x0, loco3dModel, loco3dModelTerminal)
+        return problem
+
     def createDoubleSupportFootstepModels(self, feetPos):
         supportFeetIds = [self.lfFootId, self.rfFootId, self.lhFootId, self.rhFootId]
         supportKnots = self.gait['supportKnots']
@@ -252,7 +313,7 @@ class WholeBodyModel:
         if isinstance(centroidalTask, np.ndarray):
             self.add_centroidal_momentum_tracking_cost(costModel, centroidalTask)
         self.add_support_contact_costs(contactModel, costModel, supportFootIds, forceTask)
-        self.add_stat_ctrl_reg_costs(costModel)
+        self.add_stat_ctrl_reg_costs(costModel, preImpactTask)
         # Creating the action model for the KKT dynamics with simpletic Euler integration scheme
         dmodel = crocoddyl.DifferentialActionModelContactFwdDynamics(self.state, self.actuation, contactModel,
                                                                                           costModel, 0., True)
@@ -280,6 +341,25 @@ class WholeBodyModel:
         sol = {'centroidal':centroidal_sol, 'jointPos':jointPos_sol, 
                'jointVel':jointVel_sol, 'jointTorques':jointTorques_sol}        
         return sol    
+
+    def get_contact_positions_and_forces_solution(self, solver):
+        contact_names = self.ee_frame_names
+        contact_forces = np.zeros((len(solver.xs[:-1]), 3*len(contact_names)))
+        contact_positions = np.zeros((len(solver.xs[:-1]), 3*len(contact_names)))
+        for i, d in enumerate(solver.problem.runningDatas):
+            pinocchio.framesForwardKinematics(
+                self.rmodel, self.rdata, solver.xs[i][:self.rmodel.nq])
+            m = solver.problem.runningModels[i]
+            for k, c_key in enumerate(contact_names):
+                c_id = self.rmodel.getFrameId(c_key)
+                omf = self.rdata.oMf[c_id]
+                contact_positions[i, 3*k:3*k+3] = np.resize(omf.translation, 3)
+                try:
+                    c_data = d.differential.multibody.contacts.contacts[c_key+'_contact']
+                    contact_forces[i, 3*k:3*k+3] = np.resize(c_data.jMf.actInv(c_data.f).linear, 3)
+                except:
+                    pass
+        return contact_positions, contact_forces
 
     def interpolate_whole_body_solution(self, solution):
         nq = self.rmodel.nq
@@ -311,6 +391,7 @@ class WholeBodyModel:
                   'jointVel':qdot_interpol, 'jointTorques':tau_interpol}               
         return interpol_sol
 
+    # save solution in dat files for real robot experiments
     def save_solution_dat(self, solution):
         dt_ctrl = self.dt_ctrl
         q, qdot, tau = solution['jointPos'], solution['jointVel'], solution['jointTorques']
