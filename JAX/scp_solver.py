@@ -9,13 +9,13 @@ import osqp
 
 def sum_up_all_costs(model):
     QR_cost = construct_total_cost(model) 
-    state_trust_region_cost = construct_state_trust_region_cost(model)
+    state_trust_region_cost = construct_state_trust_region_cost(model)        
     if model._robot=='solo12':
         if model._DYNAMICS_FIRST:
             total_cost = [QR_cost, state_trust_region_cost]    
         elif not model._DYNAMICS_FIRST:
-            IK_regulation_cost = construct_state_tracking_cost(model)
-            total_cost = [QR_cost, state_trust_region_cost, IK_regulation_cost]   
+            centroidal_tacking_cost = construct_state_tracking_cost(model)
+            total_cost = [QR_cost, state_trust_region_cost, centroidal_tacking_cost]       
     elif model._robot=='TALOS':
         total_cost = [QR_cost, state_trust_region_cost]
     Q = np.zeros((model._total_nb_optimizers, model._total_nb_optimizers))
@@ -29,16 +29,15 @@ def stack_up_all_constraints(model, traj_tuple, traj_data, trust_region_updates)
     initial_constraints = constraints.construct_initial_constraints(model)
     final_constraints = constraints.construct_final_constraints(model)
     dynamics_constraints = constraints.construct_dynamics_constraints(model, traj_tuple, traj_data)  
-    friction_pyramid_constraints = constraints.construct_friction_pyramid_constraints(model) 
-    state_trust_region_constraints= constraints.construct_state_trust_region_constraints(model, traj_tuple, trust_region_updates) 
-    # com_reachability_constraints = constraints.construct_com_reachability_constraints(model)
+    friction_pyramid_constraints = constraints.construct_friction_pyramid_constraints(model, traj_tuple, traj_data) 
+    state_trust_region_constraints = constraints.construct_state_trust_region_constraints(model, traj_tuple, trust_region_updates) 
     if model._robot == 'TALOS':
         cop_constraints = constraints.construct_cop_constraints(model)
         total_constraints = [initial_constraints, dynamics_constraints, final_constraints, cop_constraints, 
                                              friction_pyramid_constraints, state_trust_region_constraints]
     elif model._robot == 'solo12':
         total_constraints = [initial_constraints, dynamics_constraints, final_constraints, 
-                            friction_pyramid_constraints, state_trust_region_constraints]
+                            friction_pyramid_constraints,  state_trust_region_constraints]                                                    
     A = np.array([]).reshape(0, model._total_nb_optimizers)
     l = np.array([])
     u = np.array([])

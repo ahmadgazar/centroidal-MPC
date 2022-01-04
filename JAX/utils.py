@@ -1,12 +1,15 @@
 import numpy as np
 #TODO change to jnp and jit
 
+"""
+inner approximation
+"""
 def construct_friction_pyramid_constraint_matrix(model):
-    mu_linear = model._linear_friction_coefficient/ np.sqrt(2)
+    mu_linear = model._linear_friction_coefficient/np.sqrt(2)
     pyramid_constraint_matrix = np.array([[1. ,  0., -mu_linear], 
                                     [-1.,  0., -mu_linear],                                     
                                     [0. ,  1., -mu_linear], 
-                                    [0. , -1., -mu_linear], 
+                                    [0. , -1., -mu_linear],
                                     [0. ,  0., -1.]])
     return pyramid_constraint_matrix
 

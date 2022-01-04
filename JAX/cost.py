@@ -39,9 +39,9 @@ def construct_state_trust_region_cost(model):
 L1 norm penalty cost on the control trust region
 """
 def construct_control_trust_region_cost(model):
-    n_all, n_slack = model._total_nb_optimizers, model._nb_slack_optimizers 
+    n_all, N = model._total_nb_optimizers, model._N 
     p = np.zeros(n_all)
-    p[(n_all-n_slack):] = np.ones(n_slack) 
+    p[(n_all-N):] = np.ones(N) 
     return Cost(Q=np.zeros((n_all, n_all)), p=p)
 
 

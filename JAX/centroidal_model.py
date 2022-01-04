@@ -13,7 +13,7 @@ import jax
 @register_pytree_node_class 
 class Centroidal_model:
     # constructor
-    def __init__(self, conf):
+    def __init__(self, conf, STOCHASTIC_OCP=False):
         # protected members
         self._DYNAMICS_FIRST = conf.DYNAMICS_FIRST
         self._robot = conf.robot_name 
@@ -37,6 +37,8 @@ class Centroidal_model:
         if self._robot == 'TALOS':
             self._robot_foot_range = {'x':np.array([conf.lxp, conf.lxn]),
                                       'y':np.array([conf.lyp, conf.lyn])}
+        self._STOCHASTIC_OCP = STOCHASTIC_OCP
+        self._beta_u = conf.beta_u
         self._Cov_w = conf.cov_w  
         self._Cov_eta = conf.cov_white_noise                                                           
         # private methods
@@ -121,7 +123,8 @@ class Centroidal_model:
         # state slack indices
         self._state_slack_optimizers_indices = Slack_optimizer('state', self._n_x, self._n_u, self._n_t, self._N)
         # control slack indices 
-        # self._control_slack_optimizers_indices = Slack_optimizer('control', self._n_x, self._n_u, self._n_t, self._N) 
+        # if self._STOCHASTIC_OCP:
+        #     self._control_slack_optimizers_indices = Slack_optimizer('control', self._n_x, self._n_u, self._n_t, self._N) 
     
     def __fill_contact_data(self, conf):
         contact_trajectory = create_contact_trajectory(conf)
@@ -157,21 +160,31 @@ class Centroidal_model:
     def __fill_initial_trajectory(self):
         N = self._N
         contact_trajectory = self._contact_trajectory
-        init_trajectories = {'state':jnp.zeros((self._n_x, N+1)), 'control':jnp.zeros((self._n_u, N))}
+        init_trajectories = {'state':np.zeros((self._n_x, N+1)), 'control':np.zeros((self._n_u, N))}
         if self._DYNAMICS_FIRST:
             for time_idx in range(N):
-                vertices = jnp.array([]).reshape(0, 3)
+                vertices = np.array([]).reshape(0, 3)
                 for contact in contact_trajectory:
                     if contact_trajectory[contact][time_idx].ACTIVE:
-                        vertices = jnp.vstack([vertices, contact_trajectory[contact][time_idx].pose.translation])
+                        vertices = np.vstack([vertices, contact_trajectory[contact][time_idx].pose.translation])
                 centeroid = compute_centroid(vertices)
-                init_trajectories['state'] = jax.ops.index_update(init_trajectories['state'], jax.ops.index[:, time_idx],\
-                                jnp.array([centeroid[0], centeroid[1], self._com_z+centeroid[2], 0., 0., 0., 0., 0., 0.]))
-                init_trajectories['control'] = jax.ops.index_update(init_trajectories['control'], jax.ops.index[:, time_idx], 5e-6)
-            init_trajectories['state'] = jax.ops.index_update(init_trajectories['state'], jax.ops.index[:, -1], init_trajectories['state'][:, -2])
+                init_trajectories['state'][:, time_idx] = np.array([centeroid[0], centeroid[1], self._com_z+centeroid[2], 0., 0., 0., 0., 0., 0.])
+            init_trajectories['state'][:, -1] = init_trajectories['state'][:, -2]
         else:   
+            # warm-start SCP states using whole-body DDP
             init_trajectories['state'] = jnp.array(np.load('wholeBody_to_centroidal_traj.npz')['X'].T)
-            init_trajectories['control'] =  5e-6*jnp.ones((self._n_u, N))
+            # warm-start stochastic SCP controls 
+            robot_weight =  -self._m*self._g
+            contacts_logic_total = self._contact_data['contacts_logic']
+            for time_idx, contacts_logic_k in enumerate(contacts_logic_total):
+                robot_weight_per_contact = robot_weight/np.sum(contacts_logic_k)
+                for contact_idx, contact_logic in enumerate(contacts_logic_k):
+                    if contact_logic:
+                        fx_idx = contact_idx*3
+                        init_trajectories['control'][fx_idx:fx_idx+3, time_idx] = np.array([0.0, 0.0, robot_weight_per_contact])
+        # convert to JAX arrays
+        init_trajectories['state'] = jnp.array(init_trajectories['state'])
+        init_trajectories['control'] = jnp.array(init_trajectories['control'])
         self._init_trajectories = init_trajectories
 
     @partial(jax.jit, static_argnums=(0,)) 
@@ -202,7 +215,7 @@ class Centroidal_model:
     @partial(jax.jit, static_argnums=(0,)) 
     def compute_everything(self, x, u, contacts_position_all, contacts_logic_all, contacts_orientation_all, Sigma_curr):
         @jax.jit 
-        def compute_lqr_feedback_gains(A, B, Q, R, niter=3):
+        def compute_lqr_feedback_gains(A, B, Q, R, niter=2):
             def compute_DARE(A, B, Q, R, P):
                 AtP           = A.T @ P
                 AtPA          = AtP @ A
@@ -250,32 +263,29 @@ class Centroidal_model:
                                    'f_u':jnp.zeros((N, nx, nu)), 
                                    'f_w':jnp.zeros((N, nx, self._n_w))},
                              Covs=jnp.zeros((N+1, nx, nx)),
-                   Covs_gradients={'Cov_dx':jnp.zeros((N+1, nx, nx, nx)),
-                                   'Cov_du':jnp.zeros((N+1, nx, nx, nu))})
+                   Covs_gradients={'Cov_dx':jnp.zeros((N+1, nx, nx, nx, N+1)),
+                                   'Cov_du':jnp.zeros((N+1, nx, nx, nu, N+1))})
+        
+        def propagate_covariance_derivaties_prev(time_idx, Ak, dSigma_dz): 
+            mask = jnp.arange(dSigma_dz.shape[3]) < time_idx-1
+            return jnp.einsum('abcd,eb->aecd', jnp.einsum('ab,bcde-> acde',\
+                                   Ak, jnp.where(mask, dSigma_dz, 0.)), Ak)                           
         def loop_body(time_idx, traj_data):
-            f, A, B, C, K, Sigma_next, dSigma_dx, dSigma_du = self.compute_everything(X[:, time_idx], U[:,time_idx], self._contact_data['contacts_position'][time_idx,:], 
-                               self._contact_data['contacts_logic'][time_idx, :], self._contact_data['contacts_orient'][time_idx,:,:,:], traj_data['Covs'][time_idx,:,:]) 
+            f, A, B, C, K, Sigma_next, dSigma_dx_cur_next, dSigma_du_curr_next = self.compute_everything(X[:, time_idx], U[:,time_idx], self._contact_data['contacts_position'][time_idx,:], 
+                                                  self._contact_data['contacts_logic'][time_idx, :], self._contact_data['contacts_orient'][time_idx,:,:,:], traj_data['Covs'][time_idx,:,:]) 
+            dSigma_dx_prev_next = propagate_covariance_derivaties_prev(time_idx, A, traj_data['Covs_gradients']['Cov_dx'][time_idx,:,:,:,:])
+            dSigma_du_prev_next = propagate_covariance_derivaties_prev(time_idx, A, traj_data['Covs_gradients']['Cov_du'][time_idx,:,:,:,:])   
             traj_data['dynamics'] = jax.ops.index_update(traj_data['dynamics'], jax.ops.index[:, time_idx], f)
             traj_data['gradients']['f_x'] = jax.ops.index_update(traj_data['gradients']['f_x'], jax.ops.index[time_idx, :,:], A)
             traj_data['gradients']['f_u'] = jax.ops.index_update(traj_data['gradients']['f_u'], jax.ops.index[time_idx, :,:], B)
             traj_data['gradients']['f_w'] = jax.ops.index_update(traj_data['gradients']['f_w'], jax.ops.index[time_idx, :,:], C)
             traj_data['LQR_gains'] = jax.ops.index_update(traj_data['LQR_gains'], jax.ops.index[time_idx, :,:], K)
             traj_data['Covs'] = jax.ops.index_update(traj_data['Covs'], jax.ops.index[time_idx+1, :,:], Sigma_next)
-            traj_data['Covs_gradients']['Cov_dx'] = jax.ops.index_update(traj_data['Covs_gradients']['Cov_dx'], jax.ops.index[time_idx+1,:,:,:], dSigma_dx)
-            traj_data['Covs_gradients']['Cov_du'] = jax.ops.index_update(traj_data['Covs_gradients']['Cov_du'], jax.ops.index[time_idx+1,:,:,:], dSigma_du)
+            traj_data['Covs_gradients']['Cov_dx'] = jax.ops.index_update(traj_data['Covs_gradients']['Cov_dx'], jax.ops.index[time_idx+1,:,:,:,:], dSigma_dx_prev_next)
+            traj_data['Covs_gradients']['Cov_du'] = jax.ops.index_update(traj_data['Covs_gradients']['Cov_du'], jax.ops.index[time_idx+1,:,:,:,:], dSigma_du_prev_next)
+            traj_data['Covs_gradients']['Cov_dx'] = jax.ops.index_update(traj_data['Covs_gradients']['Cov_dx'], jax.ops.index[time_idx+1,:,:,:, time_idx], dSigma_dx_cur_next)
+            traj_data['Covs_gradients']['Cov_du'] = jax.ops.index_update(traj_data['Covs_gradients']['Cov_du'], jax.ops.index[time_idx+1,:,:,:, time_idx], dSigma_du_curr_next)
             return traj_data 
         return jax.lax.fori_loop(0, self._N, loop_body, traj_data)      
-
-    def sample_pseudorandom_uncertainties(self):
-        key = jax.random.PRNGKey(42) #initial seed 
-        contacts_positions = self._contact_data['contacts_position']
-        init = dict(key=key, random_contacts_positions=jnp.zeros((self._N, len(self._contact_data['contacts_position'][0]))))
-        def contact_loop(time_idx, curr):
-            new_key, subkey = jax.random.split(curr['key']) 
-            sample_k = jax.random.multivariate_normal(subkey, contacts_positions[time_idx], self._Cov_w)
-            curr['random_contacts_positions'] = jax.ops.index_update(curr['random_contacts_positions'], jax.ops.index[time_idx, :], sample_k) 
-            curr['key'] = new_key #update seed at every time step (i.i.d)
-            return curr
-        return jax.lax.fori_loop(0, self._N, contact_loop, init)     
 
         
