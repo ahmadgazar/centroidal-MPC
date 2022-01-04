@@ -74,7 +74,7 @@ class WholeBodyModel:
             support_contact = crocoddyl.ContactModel3D(self.state, frame_idx, np.array([0., 0., 0.]), nu,
                                                                                     np.array([0., 50.]))
             contact_model.addContact(self.rmodel.frames[frame_idx].name + "_contact", support_contact)
-            cone = crocoddyl.FrictionCone(self.Rsurf, self.mu, 4, False)
+            cone = crocoddyl.FrictionCone(self.Rsurf, self.mu, 4, True)
             cone_residual = crocoddyl.ResidualModelContactFrictionCone(state, frame_idx, cone, nu)
             cone_activation = crocoddyl.ActivationModelQuadraticBarrier(crocoddyl.ActivationBounds(cone.lb, cone.ub))
             friction_cone = crocoddyl.CostModelResidual(state, cone_activation, cone_residual)
@@ -321,25 +321,28 @@ class WholeBodyModel:
         return model
 
     def get_solution_trajectories(self, solver):
-        xs, us = solver.xs, solver.us
+        xs, us, K = solver.xs, solver.us, solver.K
         N = len(xs) 
         rmodel, rdata = self.rmodel, self.rdata
-        jointPos_sol = np.empty((N, rmodel.nq-7))
-        jointVel_sol = np.empty((N, rmodel.nv-6))
+        jointPos_sol = np.empty((N, rmodel.nq))
+        jointVel_sol = np.empty((N, rmodel.nv))
         jointTorques_sol = np.empty((N-1, rmodel.nv-6))
         centroidal_sol = np.empty((N, 9))
+        gains = np.empty((N-1, K[0].shape[0], K[0].shape[1]))
         for time_idx in range (N):
             q, v = xs[time_idx][:rmodel.nq], xs[time_idx][rmodel.nq::] 
             pinocchio.framesForwardKinematics(rmodel, rdata, q)
             pinocchio.computeCentroidalMomentum(rmodel, rdata, q, v)
             centroidal_sol[time_idx, :3] = pinocchio.centerOfMass(rmodel, rdata, q, v)
             centroidal_sol[time_idx, 3:9] = np.array(rdata.hg)
-            jointPos_sol[time_idx, :] = q[7:]
-            jointVel_sol[time_idx, :] = v[6:]
+            jointPos_sol[time_idx, :] = q
+            jointVel_sol[time_idx, :] = v
             if time_idx < N-1:
                 jointTorques_sol[time_idx, :] = us[time_idx]
+                gains[time_idx, :,:] = K[time_idx]
         sol = {'centroidal':centroidal_sol, 'jointPos':jointPos_sol, 
-               'jointVel':jointVel_sol, 'jointTorques':jointTorques_sol}        
+               'jointVel':jointVel_sol, 'jointTorques':jointTorques_sol,
+               'gains':gains}        
         return sol    
 
     def get_contact_positions_and_forces_solution(self, solver):
@@ -365,30 +368,37 @@ class WholeBodyModel:
         nq = self.rmodel.nq
         x, tau = solution['centroidal'], solution['jointTorques']
         q, qdot = solution['jointPos'], solution['jointVel']
-    
+        gains = solution['gains']
         N_inner = int(self.dt/self.dt_ctrl)
         N_outer_u  = tau.shape[0]
         N_outer_x  = x.shape[0]
         tau_interpol = np.empty((int((N_outer_u-1)*N_inner), tau.shape[1]))
+        gains_interpol = np.empty((int((N_outer_u-1)*N_inner), gains.shape[1], gains.shape[2]))
         q_interpol = np.empty((int((N_outer_x-1)*N_inner), q.shape[1]))
         qdot_interpol = np.empty((int((N_outer_x-1)*N_inner), qdot.shape[1]))
         x_interpol = np.empty((int((N_outer_x-1)*N_inner), x.shape[1]))
         for i in range(N_outer_u-1):
-            dtau = (q[i+1] - q[i])/N_inner
+            dtau = (tau[i+1] - tau[i])/N_inner
+            #TODO find more elegant way to interpolate DDP gains 
+            dgains = (gains[i+1]-gains[i])/N_inner
             for j in range(N_inner):
                 k = i*N_inner + j
                 tau_interpol[k] = tau[i] + j*dtau
+                gains_interpol[k] = gains[i,:,:]+j*dgains
         for i in range(N_outer_x-1):
             dx = (x[i+1] - x[i])/N_inner
-            dq = (q[i+1] - q[i])/N_inner
             dqdot = (qdot[i+1] - qdot[i])/N_inner
             for j in range(N_inner):
                 k = i*N_inner + j
                 x_interpol[k] = x[i] + j*dx
-                q_interpol[k] = q[i] + j*dq 
+                if j == 0:
+                    q_interpol[k] = q[i]
+                else:
+                    q_interpol[k] = pinocchio.interpolate(self.rmodel, q_interpol[k-1], q[i+1], self.dt_ctrl)
                 qdot_interpol[k] = qdot[i] + j*dqdot
         interpol_sol =  {'centroidal':x_interpol, 'jointPos':q_interpol, 
-                  'jointVel':qdot_interpol, 'jointTorques':tau_interpol}               
+                  'jointVel':qdot_interpol, 'jointTorques':tau_interpol,
+                                                'gains':gains_interpol}               
         return interpol_sol
 
     # save solution in dat files for real robot experiments
