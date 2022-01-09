@@ -20,7 +20,7 @@ np.savez('wholeBody_to_centroidal_traj.npz', X=ddp_sol_1['centroidal'])
 # create and solve centroidal scp problem
 model = Centroidal_model(conf) 
 scp_sol = solve_scp(model, conf.scp_params)                
-np.savez('centroidal_to_wholeBody_traj', X=scp_sol['state'][-1], U=scp_sol['control'][-1])               
+np.savez('centroidal_to_wholeBody_traj.npz', X=scp_sol['state'][-1], U=scp_sol['control'][-1])               
 
 # create and solve whole-body shooting problem
 wbd_model = WholeBodyModel(conf, TRACK_CENTROIDAL=True)
@@ -32,7 +32,7 @@ solver.solve(xs, us, 100, False, 0.1)
 # interpolate final whole-body solution and save in dat files 
 ddp_sol_2 = wbd_model.get_solution_trajectories(solver)
 ddp_interpolated_solution = wbd_model.interpolate_whole_body_solution(ddp_sol_2)
-np.savez('wholeBody_to_centroidal_traj.npz', X=ddp_interpolated_solution['centroidal'], 
+np.savez('wholeBody_interpolated_traj.npz', X=ddp_interpolated_solution['centroidal'], 
                                           U=ddp_interpolated_solution['jointTorques'],
                                           q=ddp_interpolated_solution['jointPos'],
                                           qdot=ddp_interpolated_solution['jointVel'])

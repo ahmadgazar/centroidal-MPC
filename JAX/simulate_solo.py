@@ -112,15 +112,15 @@ class Simulator:
 
   def run(self, tau_ff, q_des, qdot_des, nb_sims=1, tau_tilde=None): 
       nq, nv = self.robot.pin_robot.model.nq, self.robot.pin_robot.model.nv  
-      N, N_inner = tau_ff.shape[0], int(self.dt_plan/self.dt_ctrl)
+      Nu, Nx, N_inner = tau_ff.shape[0], q_des.shape[0], int(self.dt_plan/self.dt_ctrl)
       q0, dq0 = self.q0, self.nu0
       q0[0] = 0.0
       self.robot.reset_state(q0, dq0) 
       self.robot.pin_robot.framesForwardKinematics(q0)
       # pre-allocate memory for data logging
-      q_sim = np.empty((nb_sims, q_des.shape[0], nq))
-      qdot_sim = np.empty((nb_sims, N+N_inner, nv))
-      centroidal_dynamics_sim = np.empty((nb_sims, N+N_inner, 9))
+      q_sim = np.empty((nb_sims, Nx, nq))
+      qdot_sim = np.empty((nb_sims, Nx, nv))
+      centroidal_dynamics_sim = np.empty((nb_sims, Nx, 9))
       contact_forces_N = []
       contact_positions_N = []
       constraint_violations_N = []
@@ -134,17 +134,18 @@ class Simulator:
       q_sim[:, :N_inner, :], qdot_sim[:, :N_inner, :] = q0, dq0 
       centroidal_dynamics_sim[:, :N_inner, 3:9] = np.array(self.robot.pin_robot.data.hg)
       # PD gains
-      Kp = 35*np.eye(12)
+      Kp = 30*np.eye(12)
       Kd = 0.4*np.eye(12)
       for sim in range(nb_sims):
-        # no disturbance
-        if tau_tilde is None:
-          tau_tilde = np.zeros(nv-6)  
-        for time_idx in range(N):
+        for time_idx in range(Nu):
+            if tau_tilde is None:
+              tau_tilde_k = np.zeros(nv-6)
+            else:
+              tau_tilde_k = tau_tilde[sim, time_idx]  
             q, dq = self.robot.get_state()
             # tau = tau_ff + Kp(q_des - q) + Kd(qdot_des - qdot) + tau_tilde
-            tau = tau_ff[time_idx, :] + Kp @ (q_des[time_idx][7:] - q[7:])+\
-                  Kd @ (qdot_des[time_idx][6:]- dq[6:]) + tau_tilde[sim, time_idx]      
+            tau = tau_ff[time_idx, :] + Kp @ (q_des[time_idx][7:] - q[7:]) +\
+                        Kd @ (qdot_des[time_idx][6:]- dq[6:]) + tau_tilde_k    
             # apply joint torques plus disturbance
             self.robot.send_joint_command(tau)
             # get robot state after applying disturbance
@@ -162,7 +163,7 @@ class Simulator:
             contact_forces_N += [f_k]
             constraint_violations_N +=[violations]
             # step simulation 
-            env.step(sleep=False) 
+            env.step(sleep=True) 
         # reset robot to original state for the new simulation
         self.robot.reset_state(q0, dq0) 
         self.robot.pin_robot.framesForwardKinematics(q0)
@@ -179,9 +180,11 @@ class Simulator:
 if __name__ == "__main__":
     import matplotlib.pylab as plt
     import conf_solo12_trot as conf 
+    # import conf_solo12_pace as conf
+    # import conf_solo12_bound as conf
     from centroidal_model import Centroidal_model
     env = BulletEnvWithGround()
-    env.set_floor_frictions(lateral=0.7)
+    # env.set_floor_frictions(lateral=0.7)
     # load optimized nominal trajectories
     tau_ff_nom = np.load('wholeBody_interpolated_traj.npz')['U']
     q_des_nom = np.load('wholeBody_interpolated_traj.npz')['q']
@@ -197,7 +200,7 @@ if __name__ == "__main__":
     contact_sequence = model._contact_data['contacts_logic']
     # create a pybullet simulation environment and
     # sample pseudorandom centroidal disturbances 
-    nb_sims = 3
+    nb_sims = 20
     initial_seed = jax.random.PRNGKey(42)
     simulator = Simulator(env, Solo12Robot(), conf)
     w_hg = simulator.sample_pseudorandom_centroidal_uncertainties_total(initial_seed, nb_sims)
@@ -205,69 +208,90 @@ if __name__ == "__main__":
                                                        w_hg['centroidal_uncertainties_total'])
     # run monte-carlo simulations 
     data_nom = simulator.run(tau_ff_nom, q_des_nom, qdot_des_nom, nb_sims, tau_tilde)
-    data_stoch = simulator.run(tau_ff_stoch, q_des_stoch, qdot_des_stoch, nb_sims, tau_tilde)
-    print('number of friction pyramid constraint violations nominal  = ', np.sum(data_nom['constraint_violations']))
-    print('number of friction pyramid constraint violations stochastic  = ', np.sum(data_nom['constraint_violations']))
+    # data_stoch = simulator.run(tau_ff_stoch, q_des_stoch, qdot_des_stoch, nb_sims, tau_tilde)
+    # print('number of friction pyramid constraint violations nominal  = ', np.sum(data_nom['constraint_violations']))
+    # print('number of friction pyramid constraint violations stochastic  = ', np.sum(data_nom['constraint_violations']))
 
     # --------------------------------------------------
     # plot desired and simulated centroidal trajectories  
     # --------------------------------------------------
     X_des = centroidal_des
     centroidal_sim_nom = data_nom['centroidal']
-    centroidal_sim_stoch = data_stoch['centroidal']
+    # centroidal_sim_stoch = data_stoch['centroidal']
     fig, (comx, comy, comz, lx, ly, lz, kx, ky, kz) = plt.subplots(9, 1, sharex=True)
     time = np.arange(0, np.round((X_des.shape[0])*conf.dt, 2),conf.dt)
-    # comx.plot(time, X_des[:, 0], label='des')
+    comx.plot(time, X_des[:, 0], label='des', color='red')
     comx.set_title('CoM$_x$')
-    comx.legend()
     plt.setp(comx, ylabel=r'\textbf(m)')
-    # comy.plot(time, X_des[:,1], label='des')
+    comy.plot(time, X_des[:,1], label='des', color='red')
     comy.set_title('CoM$_y$')
     plt.setp(comy, ylabel=r'\textbf(m)')
-    # comz.plot(time, X_des[:,2], label='des')
+    comz.plot(time, X_des[:,2], label='des', color='red')
     comz.set_title('CoM$_z$')
     plt.setp(comz, ylabel=r'\textbf(m)')
-    # lx.plot(time, X_des[:,3], label='des')
+    lx.plot(time, X_des[:,3], label='des', color='red')
     lx.set_title('lin. mom$_x$')
     plt.setp(lx, ylabel=r'\textbf(kg.m/s)')
-    # ly.plot(time, X_des[:,4], label='des')
+    ly.plot(time, X_des[:,4], label='des', color='red')
     ly.set_title('lin. mom$_y$')
     plt.setp(ly, ylabel=r'\textbf(kg.m/s)')
-    # lz.plot(time, X_des[:,5], label='des')
+    lz.plot(time, X_des[:,5], label='des', color='red')
     lz.set_title('lin. mom$_z$')
     plt.setp(lz, ylabel=r'\textbf(kg.m/s)')
-    # kx.plot(time, X_des[:,6], label='des')
+    kx.plot(time, X_des[:,6], label='des', color='red')
     kx.set_title('ang. mom$_x$')
     plt.setp(kx, ylabel=r'\textbf(kg.m$^2$/s)')
-    # ky.plot(time, X_des[:,7], label='des')
+    ky.plot(time, X_des[:,7], label='des', color='red')
     ky.set_title('ang. mom$_y$')
     plt.setp(ky, ylabel=r'\textbf(kg.m$^2$/s)')
-    # kz.plot(time, X_des[:,8], label='des')
+    kz.plot(time, X_des[:,8], label='des', color='red')
     kz.set_title('ang. mom$_z$')
     plt.setp(kz, ylabel=r'\textbf(kg.m/s)')
     plt.xlabel(r'\textbf{time} (s)', fontsize=14)
-    fig.suptitle('centroidal trajectories')
+    fig.suptitle('centroidal trajectories', color='red')
     for sim in range(nb_sims):
       # nominal 
-      comx.plot(time, centroidal_sim_nom[sim, :, 0], 'C'+str(sim+1))
-      comy.plot(time, centroidal_sim_nom[sim, :, 1],'C'+str(sim+1))
-      comz.plot(time, centroidal_sim_nom[sim, :, 2],'C'+str(sim+1))
-      lx.plot(time, centroidal_sim_nom[sim, :, 3], 'C'+str(sim+1))
-      ly.plot(time, centroidal_sim_nom[sim, :, 4], 'C'+str(sim+1))
-      lz.plot(time, centroidal_sim_nom[sim, :, 5], 'C'+str(sim+1))
-      kx.plot(time, centroidal_sim_nom[sim, :, 6], 'C'+str(sim+1))
-      ky.plot(time, centroidal_sim_nom[sim, :, 7], 'C'+str(sim+1))
-      kz.plot(time, centroidal_sim_nom[sim, :, 8], 'C'+str(sim+1))
+      comx.plot(time, centroidal_sim_nom[sim, :, 0], color='blue')
+      comy.plot(time, centroidal_sim_nom[sim, :, 1], color='blue')
+      comz.plot(time, centroidal_sim_nom[sim, :, 2],color='blue')
+      lx.plot(time, centroidal_sim_nom[sim, :, 3], color='blue')
+      ly.plot(time, centroidal_sim_nom[sim, :, 4], color='blue')
+      lz.plot(time, centroidal_sim_nom[sim, :, 5], color='blue')
+      kx.plot(time, centroidal_sim_nom[sim, :, 6], color='blue')
+      ky.plot(time, centroidal_sim_nom[sim, :, 7], color='blue')
+      kz.plot(time, centroidal_sim_nom[sim, :, 8], color='blue')
       # stochastic
-      comx.plot(time, centroidal_sim_stoch[sim, :, 0], 'C'+str(sim+1))
-      comy.plot(time, centroidal_sim_stoch[sim, :, 1],'C'+str(sim+1))
-      comz.plot(time, centroidal_sim_stoch[sim, :, 2],'C'+str(sim+1))
-      lx.plot(time, centroidal_sim_stoch[sim, :, 3], 'C'+str(sim+1))
-      ly.plot(time, centroidal_sim_stoch[sim, :, 4], 'C'+str(sim+1))
-      lz.plot(time, centroidal_sim_stoch[sim, :, 5], 'C'+str(sim+1))
-      kx.plot(time, centroidal_sim_stoch[sim, :, 6], 'C'+str(sim+1))
-      ky.plot(time, centroidal_sim_stoch[sim, :, 7], 'C'+str(sim+1))
-      kz.plot(time, centroidal_sim_stoch[sim, :, 8], 'C'+str(sim+1))
+      # comx.plot(time, centroidal_sim_stoch[sim, :, 0], color='green')
+      # comy.plot(time, centroidal_sim_stoch[sim, :, 1],color='green')
+      # comz.plot(time, centroidal_sim_stoch[sim, :, 2],color='green')
+      # lx.plot(time, centroidal_sim_stoch[sim, :, 3], color='green')
+      # ly.plot(time, centroidal_sim_stoch[sim, :, 4], color='green')
+      # lz.plot(time, centroidal_sim_stoch[sim, :, 5], color='green')
+      # kx.plot(time, centroidal_sim_stoch[sim, :, 6], color='green')
+      # ky.plot(time, centroidal_sim_stoch[sim, :, 7], color='green')
+      # kz.plot(time, centroidal_sim_stoch[sim, :, 8], color='green')
+      if sim == nb_sims-1:
+        # nominal 
+        comx.plot(time, centroidal_sim_nom[sim, :, 0],color='blue', label='nominal')
+        comy.plot(time, centroidal_sim_nom[sim, :, 1],color='blue', label='nominal')
+        comz.plot(time, centroidal_sim_nom[sim, :, 2],color='blue', label='nominal')
+        lx.plot(time, centroidal_sim_nom[sim, :, 3], color='blue', label='nominal')
+        ly.plot(time, centroidal_sim_nom[sim, :, 4], color='blue', label='nominal')
+        lz.plot(time, centroidal_sim_nom[sim, :, 5], color='blue', label='nominal')
+        kx.plot(time, centroidal_sim_nom[sim, :, 6], color='blue', label='nominal')
+        ky.plot(time, centroidal_sim_nom[sim, :, 7], color='blue', label='nominal')
+        kz.plot(time, centroidal_sim_nom[sim, :, 8], color='blue', label='nominal')
+        # stochastic
+        # comx.plot(time, centroidal_sim_stoch[sim, :, 0], color='green', label='stochastic')
+        # comy.plot(time, centroidal_sim_stoch[sim, :, 1],color='green', label='stochastic')
+        # comz.plot(time, centroidal_sim_stoch[sim, :, 2],color='green', label='stochastic')
+        # lx.plot(time, centroidal_sim_stoch[sim, :, 3], color='green', label='stochastic')
+        # ly.plot(time, centroidal_sim_stoch[sim, :, 4], color='green', label='stochastic')
+        # lz.plot(time, centroidal_sim_stoch[sim, :, 5], color='green', label='stochastic')
+        # kx.plot(time, centroidal_sim_stoch[sim, :, 6], color='green', label='stochastic')
+        # ky.plot(time, centroidal_sim_stoch[sim, :, 7], color='green', label='stochastic')
+        # kz.plot(time, centroidal_sim_stoch[sim, :, 8], color='green', label='stochastic')
+        comx.legend()
 
     # --------------------------------------------------
     # plot desired and simulated centroidal trajectories  

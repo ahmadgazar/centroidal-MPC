@@ -1,3 +1,4 @@
+from robot_properties_solo.solo12wrapper import Solo12Config
 from contact_plan import create_contact_sequence
 from utils import compute_centroid
 import example_robot_data
@@ -13,11 +14,11 @@ dt_ctrl = 0.001
 gait = {'type': 'BOUND',
       'stepLength' : 0.1,
       'stepHeight' : 0.1,
-      'stepKnots' : 15,
-      'supportKnots' : 10,
-      'nbSteps': 6}      
+      'stepKnots' : 10,
+      'supportKnots' : 15,
+      'nbSteps': 4}      
 
-mu = 0.2 # linear friction coefficient
+mu = 0.7 # linear friction coefficient
 
 # robot model and parameters
 # --------------------------
@@ -43,7 +44,8 @@ n_u = nb_contacts*n_u_per_contact
 n_x = 9
 n_t = 1
 
-gait_templates, contact_sequence = create_contact_sequence(dt, gait, ee_frame_names, rmodel, rdata)
+q0 = np.array(Solo12Config.initial_configuration.copy())
+gait_templates, contact_sequence = create_contact_sequence(dt, gait, ee_frame_names, rmodel, rdata, q0)
            
 # intiial and final conditions:
 # -----------------------------
@@ -61,19 +63,29 @@ if DYNAMICS_FIRST:
 # planning and control horizon lengths:
 # -------------------------------------
 N = int(round(contact_sequence[-1][0].t_end/dt, 2))
-N_ctrl = int(N*(dt/dt_ctrl))    
+N_ctrl = int((N-1)*(dt/dt_ctrl))   
 
-# LQR gains (for stochastic control)
+# LQR gains (for stochastic control)      
 # ----------------------------------
-Q = 0.1*np.eye(n_x)
-R = 1*np.eye(n_u)
+Q = 100*np.eye(n_x)
+R = 5*np.eye(n_u)
 
 # noise parameters:
 # -----------------
 n_w = nb_contacts*3  # no. of contact position parameters
-cov_w = 0.01*np.eye(n_w)
-cov_white_noise = 0.001*np.eye(n_x)
+cov_w = (0.5**2)*np.eye(n_w) 
+cov_white_noise = dt*np.diag(np.array([0.3**2, 0.3**2, 0.3**2,
+                                       0.2**2, 0.2**2, 0.2**2,
+                                       0.1**2, 0.1**2, 0.1**2]))
+beta_u = 0.05 # probability of constraint violation 
 
+# centroidal cost objective weights:
+# ----------------------------------
+state_cost_weights = np.diag([1e3, 1e3, 1e3, 1e4, 1e4, 1e4, 1e8, 1e8, 1e8])
+control_cost_weights = np.diag([1e2, 1e2, 1e1, 
+                                1e2, 1e2, 1e1,
+                                1e2, 1e2, 1e1,
+                                1e2, 1e2, 1e1])
 # centroidal cost objective weights:
 # ----------------------------------
 state_cost_weights = np.diag([1e3, 1e3, 1e3, 1e4, 1e4, 1e4, 1e8, 1e8, 1e8])
@@ -83,9 +95,9 @@ control_cost_weights = np.diag([1e2, 1e2, 1e1,
                                 1e2, 1e2, 1e1])
 # whole-body cost objective weights:
 # ----------------------------------
-whole_body_task_weights = {'footTrack':1e9, 'footImpact':1e1, 'comTrack':1e6, 'stateBounds':1e3, 
-                            'stateReg':1e3, 'ctrlReg':1e2, 'frictionCone':0e3,
-                            'centroidalTrack': 1e6, 'contactForceTrack':1e3}                            
+whole_body_task_weights = {'footTrack':{'swing':1e9, 'impact':1e9}, 'impulseVel':1e2, 'comTrack':1e7, 'stateBounds':1e3, 
+                            'stateReg':{'stance':1e2, 'impact':1e3}, 'ctrlReg':{'stance':1e1, 'impact':1e2}, 'frictionCone':1e3,
+                            'centroidalTrack': 1e7, 'contactForceTrack':1e4}                                                          
 # SCP solver parameters:
 # --------------------- 
 scp_params  = {"trust_region_radius0":  50,

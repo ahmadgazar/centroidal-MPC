@@ -365,7 +365,6 @@ class WholeBodyModel:
         return contact_positions, contact_forces
 
     def interpolate_whole_body_solution(self, solution):
-        nq = self.rmodel.nq
         x, tau = solution['centroidal'], solution['jointTorques']
         q, qdot = solution['jointPos'], solution['jointVel']
         gains = solution['gains']
@@ -378,23 +377,24 @@ class WholeBodyModel:
         qdot_interpol = np.empty((int((N_outer_x-1)*N_inner), qdot.shape[1]))
         x_interpol = np.empty((int((N_outer_x-1)*N_inner), x.shape[1]))
         for i in range(N_outer_u-1):
-            dtau = (tau[i+1] - tau[i])/N_inner
+            dtau = (tau[i+1] - tau[i])/float(N_inner)
             #TODO find more elegant way to interpolate DDP gains 
-            dgains = (gains[i+1]-gains[i])/N_inner
+            dgains = (gains[i+1]-gains[i])/float(N_inner)
             for j in range(N_inner):
                 k = i*N_inner + j
                 tau_interpol[k] = tau[i] + j*dtau
                 gains_interpol[k] = gains[i,:,:]+j*dgains
         for i in range(N_outer_x-1):
-            dx = (x[i+1] - x[i])/N_inner
-            dqdot = (qdot[i+1] - qdot[i])/N_inner
+            dx = (x[i+1] - x[i])/float(N_inner)
+            dqdot = (qdot[i+1] - qdot[i])/float(N_inner)
+            dq = pinocchio.difference(self.rmodel,q[i], q[i+1])/float(N_inner)
             for j in range(N_inner):
                 k = i*N_inner + j
                 x_interpol[k] = x[i] + j*dx
                 if j == 0:
                     q_interpol[k] = q[i]
                 else:
-                    q_interpol[k] = pinocchio.interpolate(self.rmodel, q_interpol[k-1], q[i+1], self.dt_ctrl)
+                    q_interpol[k] = pinocchio.integrate(self.rmodel, q_interpol[k-1], dq)
                 qdot_interpol[k] = qdot[i] + j*dqdot
         interpol_sol =  {'centroidal':x_interpol, 'jointPos':q_interpol, 
                   'jointVel':qdot_interpol, 'jointTorques':tau_interpol,
