@@ -364,10 +364,13 @@ class WholeBodyModel:
                     pass
         return contact_positions, contact_forces
 
-    def interpolate_whole_body_solution(self, solution):
+    def interpolate_whole_body_solution(self, solution, centroidal_gains=None):
         x, tau = solution['centroidal'], solution['jointTorques']
         q, qdot = solution['jointPos'], solution['jointVel']
-        gains = solution['gains']
+        if centroidal_gains is None:
+            gains = solution['gains']
+        else:
+            gains = centroidal_gains
         N_inner = int(self.dt/self.dt_ctrl)
         N_outer_u  = tau.shape[0]
         N_outer_x  = x.shape[0]
@@ -378,7 +381,7 @@ class WholeBodyModel:
         x_interpol = np.empty((int((N_outer_x-1)*N_inner), x.shape[1]))
         for i in range(N_outer_u-1):
             dtau = (tau[i+1] - tau[i])/float(N_inner)
-            #TODO find more elegant way to interpolate DDP gains 
+            #TODO find more elegant way to interpolate LQR gains 
             dgains = (gains[i+1]-gains[i])/float(N_inner)
             for j in range(N_inner):
                 k = i*N_inner + j

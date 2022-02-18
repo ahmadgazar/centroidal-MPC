@@ -43,8 +43,8 @@ def construct_dynamics_constraints(model, prev_traj_tuple, traj_data):
         curr['mat'] = jax.lax.dynamic_update_slice(curr['mat'], -np.eye(nx), (x_index_k, x_index_k+nx)) # x_{k+1}
         linearized_dynamics = A_k@x_k + B_k@u_k - x_k_plus 
         # adding a slack to avoid infeasibility due to numerical issues
-        curr['lb'] = jax.lax.dynamic_update_slice_in_dim(curr['lb'], linearized_dynamics - 1e-6, x_index_k, 0)  
-        curr['ub'] = jax.lax.dynamic_update_slice_in_dim(curr['ub'], linearized_dynamics + 1e-6, x_index_k, 0) 
+        curr['lb'] = jax.lax.dynamic_update_slice_in_dim(curr['lb'], linearized_dynamics - 1e-12, x_index_k, 0)  
+        curr['ub'] = jax.lax.dynamic_update_slice_in_dim(curr['ub'], linearized_dynamics + 1e-12, x_index_k, 0) 
         return curr
     updated_dict= jax.lax.fori_loop(0, N, fill_linearized_dynamics_loop, constraint_dict)
     return Constraint(mat=updated_dict['mat'], lb=updated_dict['lb'], ub=updated_dict['ub'])
@@ -143,6 +143,8 @@ def construct_cop_constraints(model):
         u_total = np.hstack([u_total, u_x, u_y])
     return Constraint(mat=Aineq_total, lb=l_total, ub=u_total)
 
+def check_symmetric(a, rtol=1e-05, atol=1e-08):
+    return np.allclose(a, a.T, rtol=rtol, atol=atol)
 """
 inner-linear approximation of friction cone constraints 
 """
@@ -150,7 +152,7 @@ def construct_friction_pyramid_constraints(model, prev_traj_tuple=None, traj_dat
     print('adding friction pyramid constraints ..', '\n')
     nx, nu, n_all, N = model._n_x, model._n_u, model._total_nb_optimizers, model._N 
     friction_pyramid_mat = construct_friction_pyramid_constraint_matrix(model)
-    xi = norm.ppf(norm.cdf(1-model._beta_u)/(friction_pyramid_mat.shape[0]*3))
+    xi = norm.ppf(1-(model._beta_u/friction_pyramid_mat.shape[0]*3))
     X, U = prev_traj_tuple['state'], prev_traj_tuple['control']
     dSigma_dx = traj_data['Covs_gradients']['Cov_dx']  
     dSigma_du = traj_data['Covs_gradients']['Cov_du']
@@ -172,7 +174,7 @@ def construct_friction_pyramid_constraints(model, prev_traj_tuple=None, traj_dat
             if contact_trajectory[contact][time_idx].ACTIVE:
                 contact_orientation = contact_trajectory[contact][time_idx].pose.rotation
                 rotated_friction_pyramid_mat = friction_pyramid_mat @ contact_orientation.T
-                for constraint_idx in range(rotated_friction_pyramid_mat.shape[0]):
+                for constraint_idx in range(4):
                     idx = time_idx*rotated_friction_pyramid_mat.shape[0] + constraint_idx
                     # nominal friction pyramid constraints
                     for x_y_z_idx, optimizer_object in enumerate(force_optimizers):  
@@ -183,7 +185,6 @@ def construct_friction_pyramid_constraints(model, prev_traj_tuple=None, traj_dat
                         dSigma_dx_k, dSigma_du_k = dSigma_dx[time_idx], dSigma_du[time_idx]
                         K = K_traj[time_idx, fx_contact_idx:fx_contact_idx+3, :]
                         K_Sigma_Kt = K @ Sigma_traj[time_idx, :, :] @ K.T
-                        # extract the ith individual constraint
                         Gi = Aineq[idx, u0_idx:u0_idx+3] 
                         K_dSigma_dx_Kt = np.einsum('ij, jgkf->igkf', K, np.einsum('ijkf, gj->igkf', dSigma_dx_k, K))
                         K_dSigma_du_Kt = np.einsum('ij, jgkf->igkf', K, np.einsum('ijkf, gj->igkf', dSigma_du_k, K))
@@ -195,15 +196,23 @@ def construct_friction_pyramid_constraints(model, prev_traj_tuple=None, traj_dat
                             # consider only active  of the individual chance constraint
                             if Gi_u > 1e-6 and sqrt_K_Sigma_Kt > 1e-6:
                                 # linearized individual chance-constraint state contribution
-                                dSigma_dx_k_total = (0.5*(1/(2*Gi_u*sqrt_K_Sigma_Kt))*(2*Gi_u*K_dSigma_dx_Kt[u_idx, u_idx])).flatten(order='F') 
+                                dSigma_dx_k_total = ((1/(2*Gi_u*sqrt_K_Sigma_Kt))*(2*Gi_u*K_dSigma_dx_Kt[u_idx, u_idx])).flatten(order='F') 
                                 Aineq[idx, :nx*(N+1)] += xi * dSigma_dx_k_total 
-                                ub[idx] += xi*((dSigma_dx_k_total @ X.flatten(order='F')))
+                                back_off_x = xi*((dSigma_dx_k_total @ X.flatten(order='F')))
+                                ub[idx] += back_off_x 
+                                # print('dSigma/dx =  ', dSigma_dx_k_total)
+                                # print('backoff magnitude x = ', back_off_x)
                                 # linearized individual chance-constraint control contribution
-                                dSigma_du_k_total = (0.5*(1/(2*Gi_u*sqrt_K_Sigma_Kt))*(2*Gi_u*K_dSigma_du_Kt[u_idx, u_idx]))[:, :N].flatten(order='F') 
+                                dSigma_du_k_total = ((1/(2*Gi_u*sqrt_K_Sigma_Kt))*(2*Gi_u*K_dSigma_du_Kt[u_idx, u_idx]))[:, :N].flatten(order='F') 
                                 Aineq[idx, nx*(N+1):nx*(N+1)+nu*N] += xi * dSigma_du_k_total 
-                                ub[idx] += xi*(dSigma_du_k_total @ U.flatten(order='F'))
+                                back_off_u = xi*(dSigma_du_k_total @ U.flatten(order='F')) 
+                                ub[idx] += back_off_u
+                                # print('dSigma/du =  ', dSigma_du_k_total)
+                                # print('backoff magnitude u = ', back_off_u)
                                 # original individual chance-constraint back-off
-                                ub[idx] -= xi*(2*Gi_u*sqrt_K_Sigma_Kt)
+                                back_off_linear = xi*(2*Gi_u*sqrt_K_Sigma_Kt) 
+                                # print(back_off_linear)
+                                ub[idx] -= back_off_linear
         Aineq_total = np.vstack([Aineq_total, Aineq])
         ub_total = np.hstack([ub_total, ub])
     return Constraint(mat=Aineq_total, lb=-np.inf*np.ones(nb_contacts*nb_constraints_per_contact), ub=ub_total)
@@ -312,16 +321,19 @@ def evaluate_friction_pyramid_constraints(model, forces):
                         Aineq[idx, optimizer_idx] = rotated_friction_pyramid_mat[constraint_idx, x_y_z_idx]
         Aineq_total = np.vstack([Aineq_total, Aineq])
         ub_total = np.hstack([ub_total, ub])
+    nb_constraint_violations = 0
+    nb_constraint_saturations = 0    
     for constraint_idx in range(Aineq_total.shape[0]):
         lhs = Aineq_total[constraint_idx, nx*(N+1):nx*(N+1)+nu*N]@ U_sol 
-        if lhs <= ub_total[constraint_idx]:
-            continue
-            # if(abs(lhs-ub[constraint_idx])<=1e-8):
-            #     pass 
-            #     print('touching constraint number ', constraint_idx)
+        if lhs <= ub_total[constraint_idx] + 5e-5:
+            if(abs(lhs-ub_total[constraint_idx])<=1e-6):
+                # print('saturating constraint number ', constraint_idx)
+                nb_constraint_saturations +=1
         else:
-            print('violating constraint number ', constraint_idx)     
-
+            nb_constraint_violations += 1        
+            # print('violating constraint number ', constraint_idx)     
+    print('total no. of constraint violations =  ', nb_constraint_violations)
+    print('total no. of constraint saturations  =  ', nb_constraint_saturations)
 
 
 

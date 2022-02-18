@@ -16,7 +16,7 @@ gait ={'type': 'PACE',
       'stepHeight' : 0.1,
       'stepKnots' : 5,
       'supportKnots' : 20,
-      'nbSteps': 6}      
+      'nbSteps': 4}      
 
 mu = 0.7 # linear friction coefficient
 
@@ -45,6 +45,7 @@ n_x = 9
 n_t = 1
 
 q0 = np.array(Solo12Config.initial_configuration.copy())
+q0[0] = 0.0
 gait_templates, contact_sequence = create_contact_sequence(dt, gait, ee_frame_names, rmodel, rdata, q0)
            
 # intiial and final conditions:
@@ -67,44 +68,49 @@ N_ctrl = int((N-1)*(dt/dt_ctrl))
 
 # LQR gains (for stochastic control)      
 # ----------------------------------
-Q = 100*np.eye(n_x)
-R = 10*np.eye(n_u)
+Q = np.diag([1e4, 1e4, 1e4, 
+             1e3, 1e3, 1e3, 
+             1e3, 1e3, 1e3])
+
+R = np.diag([1e2,1e2,1e1,
+             1e2,1e2,1e1,
+             1e2,1e2,1e1,
+             1e2,1e2,1e1])
 
 # noise parameters:
 # -----------------
 n_w = nb_contacts*3  # no. of contact position parameters
-cov_w = (0.5**2)*np.eye(n_w) 
-cov_white_noise = dt*np.diag(np.array([0.3**2, 0.3**2, 0.3**2,
-                                       0.2**2, 0.2**2, 0.2**2,
-                                       0.1**2, 0.1**2, 0.1**2]))
-beta_u = 0.05 # probability of constraint violation 
+# contact position noise
+# discretizaton is done inside uncertainty propagation
+cov_w = np.diag([0.4**2, 0.4**2, 0.4**2,
+                 0.4**2, 0.4**2, 0.4**2,
+                 0.4**2, 0.4**2, 0.4**2,
+                 0.4**2, 0.4**2, 0.4**2])
+# dsicrete addtive noise
+cov_white_noise = dt*np.diag(np.array([0.65**2, 0.65**2, 0.3**2,
+                                       0.8**2, 0.7**2, 0.3**2,
+                                       0.8**2, 0.7**2, 0.3**2]))
+
+beta_u = 0.01 # probability of constraint violation 
 
 # centroidal cost objective weights:
 # ----------------------------------
-state_cost_weights = np.diag([1e3, 1e3, 1e3, 1e4, 1e4, 1e4, 1e8, 1e8, 1e8])
+state_cost_weights = np.diag([1e4, 1e4, 1e4, 1e3, 1e3, 1e3, 1e5, 1e5, 1e5])
 control_cost_weights = np.diag([1e2, 1e2, 1e1, 
                                 1e2, 1e2, 1e1,
                                 1e2, 1e2, 1e1,
                                 1e2, 1e2, 1e1])
+
 # whole-body cost objective weights:
 # ----------------------------------
 whole_body_task_weights = {'footTrack':{'swing':1e9, 'impact':1e9}, 'impulseVel':1e2, 'comTrack':1e7, 'stateBounds':1e3, 
                             'stateReg':{'stance':1e2, 'impact':1e2}, 'ctrlReg':{'stance':1e1, 'impact':1e1}, 'frictionCone':1e4,
-                            'centroidalTrack': 1e7, 'contactForceTrack':1e3}                                                             
+                            'centroidalTrack': 1e7, 'contactForceTrack':5e3}                                                             
 # SCP solver parameters:
 # --------------------- 
-scp_params  = {"trust_region_radius0":  50,
-              "omega0":                100,
-           "omega_max":             1.0e10,
-             "epsilon":             1.0e-6,
-                "rho0":                0.4,
-                "rho1":                1.5, 
-           "beta_succ":                 2.,
-           "beta_fail":                0.5,
-          "gamma_fail":                 5,
-"convergence_threshold":              1e-3,
-      "max_iterations":                 20,
-             "padding":                 0.1}
+scp_params  = {"trust_region_radius0":  50, "omega0": 100, "omega_max": 1.0e10, "epsilon": 1.0e-6, "rho0": 0.4, 
+               "rho1": 1.5, "beta_succ": 2.,  "beta_fail": 0.5, "gamma_fail": 5, "convergence_threshold": 1e-3, 
+               "max_iterations": 20}
 
 # Gepetto viewer:
 cameraTF = [2., 2.68, 0.84, 0.2, 0.62, 0.72, 0.22]

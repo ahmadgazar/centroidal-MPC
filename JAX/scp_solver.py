@@ -60,7 +60,7 @@ def solve_subproblem(cost, constraints):
     QP_FEASIBLITY = True
     prob  = osqp.OSQP()
     prob.setup(cost.Q, cost.p, constraints.mat, constraints.lb, constraints.ub, 
-                                                warm_start=True, verbose=False)
+        warm_start=True, verbose=False, eps_abs=1e-7, eps_rel=1e-7, polish=True)
     res = prob.solve()
     if res.info.status != 'solved':
         warn("[solve_OSQP]: Problem unfeasible.")
@@ -93,7 +93,7 @@ def get_QP_solution(model, res):
     return dict(state=X_sol, control=U_sol)
 
 def solve_scp(model, scp_params):
-    all_solution = dict(state=[], control=[])
+    all_solution = dict(state=[], control=[], gains=[], covs=[])
     rho_0, rho_max = scp_params['rho0'], scp_params['rho1']
     omega_max = scp_params['omega_max']
     beta_succ, beta_fail = scp_params['beta_succ'], scp_params['beta_fail']
@@ -139,6 +139,8 @@ def solve_scp(model, scp_params):
                 print('linearized model is accurate enough .. accepting solution ')
                 all_solution['state'].append(sol_traj_dict['state'])
                 all_solution['control'].append(sol_traj_dict['control'])
+                all_solution['gains'].append(traj_data['LQR_gains'])
+                all_solution['covs'].append(traj_data['Covs'])
                 B_success = True                                                      
                 # check if you can decrease trust region radius more than initial guess
                 if rho < rho_0:

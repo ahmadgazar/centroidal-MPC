@@ -181,7 +181,7 @@ class Centroidal_model:
                 for contact_idx, contact_logic in enumerate(contacts_logic_k):
                     if contact_logic:
                         fx_idx = contact_idx*3
-                        init_trajectories['control'][fx_idx:fx_idx+3, time_idx] = np.array([0.0, 0.0, robot_weight_per_contact])
+                        init_trajectories['control'][fx_idx:fx_idx+3, time_idx] = np.array([1e-3, 1e-3, robot_weight_per_contact])
         # convert to JAX arrays
         init_trajectories['state'] = jnp.array(init_trajectories['state'])
         init_trajectories['control'] = jnp.array(init_trajectories['control'])

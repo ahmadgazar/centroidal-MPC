@@ -45,6 +45,26 @@ def create_contact_trajectory(conf):
                 contact_trajectory[contact.CONTACT].append(contact)  
     return contact_trajectory                
 
+def interpolate_contact_trajectory(conf, contact_trajectory):
+    N_outer = len(contact_trajectory['FR'])
+    N_inner = int(conf.dt/conf.dt_ctrl)
+    N_interpol = (N_outer-1)*N_inner
+    contact_trajectory_interpol = dict(FL = np.empty((N_interpol, 3)),
+                                       FR = np.empty((N_interpol, 3)),
+                                       HL = np.empty((N_interpol, 3)),
+                                       HR = np.empty((N_interpol, 3)))
+    for contact_name in contact_trajectory:
+        contact = contact_trajectory[contact_name]
+        for i in range(N_outer-1):
+            if contact[i].ACTIVE:
+                contact_pos = contact[i].pose.translation
+            else:
+                contact_pos = np.zeros(3)
+            for j in range(N_inner):
+                k =  i*N_inner + j
+                contact_trajectory_interpol[contact_name][k] = contact_pos
+    return contact_trajectory_interpol
+
 def compute_foot_traj(conf):
     step_height = conf.step_height
     dt_ctrl = conf.dt_ctrl
